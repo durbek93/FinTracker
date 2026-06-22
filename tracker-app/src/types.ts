@@ -26,9 +26,9 @@ export interface Account {
 }
 
 export const isAccountProtected = (acc: Account): boolean => {
-  if (acc.isProtected === false) return false;
-  if (acc.isProtected === true) return true;
-  return acc.name.includes('*2991') || acc.name.toLowerCase().includes('наличка');
+  // Protection is managed exclusively via the isProtected field.
+  // Never hardcode card numbers or account names here — security audit fix.
+  return acc.isProtected === true;
 };
 
 export interface Transaction {

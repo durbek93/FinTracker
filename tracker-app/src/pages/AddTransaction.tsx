@@ -4,7 +4,8 @@ import { useStore } from '../store';
 import { getIcon } from '../lib/icons';
 import { format } from 'date-fns';
 import { TransactionType, Currency } from '../types';
-import { ArrowRightLeft } from 'lucide-react';
+import { ArrowRightLeft, ArrowLeft, Sparkles, Loader2 } from 'lucide-react';
+import { parseTransactionText, hasGeminiKey } from '../lib/gemini';
 
 export default function AddTransaction() {
   const { addTransaction, updateTransaction, deleteTransaction, accounts, transactions, categories } = useStore();
@@ -26,6 +27,12 @@ export default function AddTransaction() {
   const [note, setNote] = useState('');
   const [addToExpenses, setAddToExpenses] = useState(false);
   const [excludeFromStats, setExcludeFromStats] = useState(false);
+
+  // Smart Input state
+  const [aiText, setAiText] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState('');
+  const [aiSuccess, setAiSuccess] = useState(false);
 
   const todayStr = format(new Date(), 'yyyy-MM-dd');
 
@@ -77,14 +84,14 @@ export default function AddTransaction() {
   const isCategoryExcluded = selectedCategory?.excludeFromStats || false;
 
   const handleAmountChange = (val: string) => {
-    let raw = val.replace(/\s/g, '').replace(',', '.');
+    const raw = val.replace(/\s/g, '').replace(',', '.');
     if (/^\d*\.?\d{0,2}$/.test(raw)) {
       setAmount(raw);
     }
   };
 
   const handleExchangeRateChange = (val: string) => {
-    let raw = val.replace(/\s/g, '').replace(',', '.');
+    const raw = val.replace(/\s/g, '').replace(',', '.');
     if (/^\d*\.?\d{0,4}$/.test(raw)) setExchangeRate(raw);
   };
 
@@ -186,12 +193,161 @@ export default function AddTransaction() {
     }
   };
 
+  // Smart Input handler
+  const handleSmartInput = async () => {
+    if (!aiText.trim()) return;
+    setAiLoading(true);
+    setAiError('');
+    setAiSuccess(false);
+    try {
+      const categoryNames = categories.map(c => c.name);
+      // Передаем текущую дату и время для относительного парсинга
+      const parsed = await parseTransactionText(aiText, categoryNames, date, time);
+
+      let matchedCategoryId = categoryId;
+      const matched = categories.find(
+        c => c.name.toLowerCase() === parsed.suggestedCategoryName.toLowerCase() && c.type === parsed.type
+      );
+      if (matched) matchedCategoryId = matched.id;
+
+      const finalDate = parsed.date || date;
+      const finalTime = parsed.time || time;
+
+      if (!matchedCategoryId && (parsed.type as string) !== 'transfer') {
+        throw new Error('Не удалось точно определить категорию. Попробуйте сформулировать иначе.');
+      }
+
+      const payload: any = {
+        amount: Number(parsed.amount),
+        currency: parsed.currency,
+        categoryId: matchedCategoryId,
+        accountId: accountId,
+        date: new Date(`${finalDate}T${finalTime}`).toISOString(),
+        type: parsed.type,
+        note: parsed.note || ''
+      };
+
+      // Автоматическое сохранение транзакции
+      await addTransaction(payload);
+
+      // Обновляем визуальные поля и очищаем ввод
+      setAmount('');
+      setNote('');
+      setType(parsed.type);
+      setCurrency(parsed.currency);
+      if (matchedCategoryId) setCategoryId(matchedCategoryId);
+      setDate(finalDate);
+      setTime(finalTime);
+
+      setAiText('');
+      setAiSuccess(true);
+      setTimeout(() => setAiSuccess(false), 2500);
+    } catch (err: any) {
+      if (err.message === 'NO_API_KEY') {
+        setAiError('Не найден API ключ. Добавьте его в Настройках → AI-помощник.');
+      } else if (err.message.includes('429') || err.message.includes('limit: 0')) {
+        setAiError('Бесплатный лимит недоступен (limit: 0). Возможно, ваш регион не поддерживает Free Tier или нужно привязать карту в Google Cloud.');
+      } else {
+        setAiError('Ошибка API: ' + (err.message || 'Не удалось распознать операцию.'));
+      }
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   return (
     <div className="page-content animate-scale-in">
-      <div className="page-header" style={{ marginBottom: '20px' }}>
-        <h2>{isEditing ? 'Редактирование' : 'Новая операция'}</h2>
+      <div className="page-header" style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '16px' }}>
+        {isEditing && (
+          <button type="button" onClick={() => navigate(-1)} style={{ color: 'var(--text-primary)', display: 'flex', alignItems: 'center', background: 'transparent', padding: '4px' }}>
+            <ArrowLeft size={24} />
+          </button>
+        )}
+        <h2 style={{ margin: 0 }}>{isEditing ? 'Редактирование' : 'Новая операция'}</h2>
       </div>
       
+      {/* Smart Input Block — only show on new transaction */}
+      {!isEditing && (
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(99,102,241,0.12) 0%, rgba(168,85,247,0.08) 100%)',
+          border: '1px solid rgba(99,102,241,0.3)',
+          borderRadius: 'var(--radius-md)',
+          padding: '16px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '10px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
+            <Sparkles size={16} style={{ color: '#818cf8' }} />
+            <span style={{ fontSize: '13px', fontWeight: 600, color: '#818cf8' }}>
+              {hasGeminiKey() ? 'AI умный ввод' : 'AI умный ввод (требуется API ключ)'}
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <input
+              type="text"
+              value={aiText}
+              onChange={e => setAiText(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && !aiLoading && handleSmartInput()}
+              placeholder="Например: купил продукты на 150 тысяч..."
+              disabled={aiLoading}
+              style={{
+                flex: 1, 
+                fontSize: '14px', 
+                background: 'rgba(0,0,0,0.2)', 
+                border: '1px solid rgba(99,102,241,0.4)', 
+                color: 'var(--text-primary)',
+                boxShadow: aiLoading ? '0 0 15px rgba(168,85,247,0.4)' : 'none',
+                transition: 'all 0.3s ease',
+                animation: aiLoading ? 'aiPulse 1.5s infinite' : 'none'
+              }}
+            />
+            <button
+              type="button"
+              onClick={handleSmartInput}
+              disabled={!aiText.trim() || aiLoading}
+              style={{
+                padding: '10px 16px',
+                borderRadius: 'var(--radius-sm)',
+                background: aiSuccess
+                  ? 'var(--success)'
+                  : 'linear-gradient(135deg, #6366f1, #a855f7)',
+                color: 'white',
+                fontWeight: 600,
+                fontSize: '14px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                transition: 'all 0.3s',
+                flexShrink: 0,
+                boxShadow: '0 4px 15px rgba(99,102,241,0.35)'
+              }}
+            >
+              {aiLoading
+                ? <Loader2 size={16} className="animate-spin" />
+                : aiSuccess
+                  ? 'Заполнено ✓'
+                  : <><Sparkles size={16} /> Анализировать</>}
+            </button>
+          </div>
+          <style dangerouslySetInnerHTML={{ __html: `
+            @keyframes aiPulse {
+              0% { box-shadow: 0 0 0 0 rgba(168,85,247, 0.4); }
+              70% { box-shadow: 0 0 0 10px rgba(168,85,247, 0); }
+              100% { box-shadow: 0 0 0 0 rgba(168,85,247, 0); }
+            }
+          `}} />
+          {aiError && (
+            <p style={{ fontSize: '12px', color: 'var(--danger)', margin: 0 }}>{aiError}</p>
+          )}
+          {!aiError && !aiSuccess && (
+            <p style={{ fontSize: '11px', color: 'rgba(129,140,248,0.7)', margin: 0 }}>
+              Опишите операцию свободным текстом, IA заполнит форму автоматически
+            </p>
+          )}
+        </div>
+      )}
+
       <form onSubmit={handleSave} className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
         
         {accounts.length === 0 && (

@@ -1,9 +1,10 @@
-import { X, Moon, Sun, Globe, Edit2, Shield, ShieldOff, Trash2, Link as LinkIcon, Unlink, Phone, Mail, Loader2 } from 'lucide-react';
+import { X, Moon, Sun, Globe, Edit2, Shield, ShieldOff, Trash2, Link as LinkIcon, Unlink, Phone, Mail, Loader2, Brain, Eye, EyeOff, Check } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import { isAccountProtected } from '../types';
 import { auth } from '../firebase';
+import { getGeminiKey, setGeminiKey, removeGeminiKey, hasGeminiKey, FINANCIAL_STRATEGIES } from '../lib/gemini';
 import { 
   GoogleAuthProvider, 
   EmailAuthProvider, 
@@ -44,6 +45,27 @@ export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProp
   const [linkPassword, setLinkPassword] = useState('');
   const [linkPhone, setLinkPhone] = useState('+998');
   const [linkCode, setLinkCode] = useState('');
+  // AI Key state
+  const [apiKeyInput, setApiKeyInput] = useState(() => getGeminiKey() || '');
+  const [showKey, setShowKey] = useState(false);
+  const [keySaved, setKeySaved] = useState(hasGeminiKey);
+  const [aiInstructions, setAiInstructions] = useState(() => localStorage.getItem('gemini_instructions') || '');
+  const [selectedStrategy, setSelectedStrategy] = useState(() => localStorage.getItem('gemini_strategy') || 'none');
+
+  const handleSaveKey = () => {
+    if (apiKeyInput.trim().length > 10) {
+      setGeminiKey(apiKeyInput.trim());
+      setKeySaved(true);
+      setTimeout(() => setKeySaved(false), 2000);
+    }
+  };
+
+  const handleRemoveKey = () => {
+    removeGeminiKey();
+    setApiKeyInput('');
+    setKeySaved(false);
+  };
+
   const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
 
   useEffect(() => {
@@ -415,6 +437,140 @@ export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProp
             <Edit2 size={20} />
             <span style={{ flex: 1, textAlign: 'left', fontWeight: 500 }}>Управление категориями</span>
           </button>
+        </div>
+
+        {/* ─── AI Key Section ─── */}
+        <div>
+          <label className="text-muted" style={{ display: 'block', fontSize: '14px', marginBottom: '12px' }}>AI-помощник</label>
+          <div style={{
+            background: 'var(--bg-secondary)',
+            borderRadius: 'var(--radius-md)',
+            padding: '16px',
+            border: hasGeminiKey() ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)',
+            display: 'flex', flexDirection: 'column', gap: '12px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <Brain size={20} style={{ color: hasGeminiKey() ? 'var(--accent-primary)' : 'var(--text-muted)', flexShrink: 0 }} />
+              <div style={{ flex: 1 }}>
+                <p style={{ fontWeight: 600, fontSize: '14px', marginBottom: '2px' }}>Gemini API Ключ</p>
+                <p className="text-muted" style={{ fontSize: '11px', lineHeight: 1.4 }}>
+                  {hasGeminiKey() ? '✅ Ключ сохранён — AI-функции активны' : 'Введите ключ из Google AI Studio для активации ИИ'}
+                </p>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <div style={{ position: 'relative', flex: 1 }}>
+                <input
+                  type={showKey ? 'text' : 'password'}
+                  value={apiKeyInput}
+                  onChange={e => setApiKeyInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleSaveKey()}
+                  placeholder="AIzaSy..."
+                  style={{ width: '100%', boxSizing: 'border-box', paddingRight: '40px', fontSize: '13px', fontFamily: 'monospace' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowKey(v => !v)}
+                  style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', background: 'transparent', padding: '4px' }}
+                >
+                  {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+              <button
+                onClick={handleSaveKey}
+                disabled={!apiKeyInput.trim() || apiKeyInput.trim().length < 10}
+                style={{
+                  padding: '8px 14px', borderRadius: 'var(--radius-sm)',
+                  background: keySaved ? 'var(--success)' : 'var(--accent-primary)',
+                  color: 'white', fontSize: '13px', fontWeight: 600,
+                  transition: 'background 0.3s',
+                  display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0
+                }}
+              >
+                {keySaved ? <Check size={16} /> : 'Сохранить'}
+              </button>
+            </div>
+
+            {hasGeminiKey() && (
+              <div style={{ marginTop: '4px' }}>
+                <button
+                  onClick={handleRemoveKey}
+                  style={{ fontSize: '12px', color: 'var(--danger)', textAlign: 'left', background: 'transparent' }}
+                >
+                  Удалить ключ
+                </button>
+              </div>
+            )}
+
+            <div style={{ marginTop: '12px', borderTop: '1px solid var(--border-color)', paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px', display: 'block' }}>
+                  Финансовая стратегия
+                </label>
+                <select
+                  value={selectedStrategy}
+                  onChange={(e) => {
+                    setSelectedStrategy(e.target.value);
+                    localStorage.setItem('gemini_strategy', e.target.value);
+                  }}
+                  style={{
+                    width: '100%',
+                    background: 'var(--bg-tertiary)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '8px 10px',
+                    fontSize: '13px',
+                    color: 'var(--text-primary)',
+                    outline: 'none'
+                  }}
+                >
+                  {FINANCIAL_STRATEGIES.map(s => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+                <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px', lineHeight: 1.4 }}>
+                  {FINANCIAL_STRATEGIES.find(s => s.id === selectedStrategy)?.description}
+                </p>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Edit2 size={14} /> Дополнительные пожелания
+                </label>
+                <textarea 
+                  value={aiInstructions}
+                  onChange={(e) => {
+                    setAiInstructions(e.target.value);
+                    localStorage.setItem('gemini_instructions', e.target.value);
+                  }}
+                  placeholder="Пример: Обращайся на 'вы', делай упор на долгосрочные цели..."
+                  style={{
+                    width: '100%',
+                    minHeight: '100px',
+                    background: 'var(--bg-tertiary)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '10px',
+                    fontSize: '13px',
+                    lineHeight: '1.5',
+                    color: 'var(--text-primary)',
+                    resize: 'vertical',
+                    outline: 'none',
+                    transition: 'border-color 0.3s'
+                  }}
+                />
+                <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px', fontStyle: 'italic', lineHeight: 1.4 }}>
+                  Укажите тон общения ИИ или дополнительные специфические правила анализа трат.
+                </p>
+              </div>
+            </div>
+
+            <p className="text-muted" style={{ fontSize: '11px', lineHeight: 1.5, marginTop: '8px' }}>
+              🔒 Ключ хранится <strong>только на вашем устройстве</strong> в памяти браузера. Он никогда не передаётся нам и не попадает в код.
+              Получить ключ: <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{ color: 'var(--accent-primary)' }}>aistudio.google.com</a>
+            </p>
+          </div>
         </div>
 
         <div>

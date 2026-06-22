@@ -215,6 +215,9 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const updateTransaction = async (id: string, t: Partial<Omit<Transaction, 'id'>>) => {
+    if (!currentUser) return;
+    const tx = transactions.find(tx => tx.id === id);
+    if (!tx || tx.userId !== currentUser.uid) return;
     try {
       await updateDoc(doc(db, 'transactions', id), t);
     } catch (e) {
@@ -223,6 +226,9 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const deleteTransaction = async (id: string) => {
+    if (!currentUser) return;
+    const tx = transactions.find(tx => tx.id === id);
+    if (!tx || tx.userId !== currentUser.uid) return;
     try {
       await deleteDoc(doc(db, 'transactions', id));
     } catch (e) {
@@ -240,6 +246,9 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const updateAccount = async (id: string, updates: Partial<Account>) => {
+    if (!currentUser) return;
+    const acc = accounts.find(a => a.id === id);
+    if (!acc || acc.userId !== currentUser.uid) return;
     try {
       await updateDoc(doc(db, 'accounts', id), updates);
     } catch (e) {
@@ -248,12 +257,16 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const deleteAccount = async (id: string) => {
+    if (!currentUser) return;
+    const acc = accounts.find(a => a.id === id);
+    if (!acc || acc.userId !== currentUser.uid) return;
+
+    if (isAccountProtected(acc)) {
+      alert("Этот счет системный и защищен от удаления!");
+      return;
+    }
+
     try {
-      const acc = accounts.find(a => a.id === id);
-      if (acc && isAccountProtected(acc)) {
-        alert("Этот счет системный и защищен от удаления!");
-        return;
-      }
       await deleteDoc(doc(db, 'accounts', id));
     } catch (e) {
       console.error("Error deleting account: ", e);
@@ -270,6 +283,9 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const updateCategory = async (id: string, c: Partial<Omit<Category, 'id'>>) => {
+    if (!currentUser) return;
+    const cat = categories.find(ct => ct.id === id);
+    if (!cat || cat.userId !== currentUser.uid) return;
     try {
       await updateDoc(doc(db, 'categories', id), c);
     } catch (e) {
@@ -278,6 +294,10 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const deleteCategory = async (id: string) => {
+    if (!currentUser) return;
+    const cat = categories.find(ct => ct.id === id);
+    if (!cat || cat.userId !== currentUser.uid) return;
+
     // Check for used transactions
     const isInUse = transactions.some(t => t.categoryId === id);
     if (isInUse) {

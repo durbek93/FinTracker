@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import { getIcon } from '../lib/icons';
-import { PieChart, BarChart2, TrendingDown, Calendar } from 'lucide-react';
+import { PieChart, BarChart2, TrendingDown, Calendar, Brain, Sparkles, Loader2, ChevronDown, ChevronUp, Download } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, startOfDay, endOfDay, isValid } from 'date-fns';
+import { getFinancialAdvice, AnalystReport, hasGeminiKey, FINANCIAL_STRATEGIES } from '../lib/gemini';
 
 const formatCurrency = (amount: number, currency: string) => {
   return new Intl.NumberFormat('ru-RU').format(Math.round(amount)) + ' ' + currency;
@@ -64,9 +65,18 @@ export default function Analytics() {
   const { transactions: storeTransactions, categories } = useStore();
   const navigate = useNavigate();
 
+  const strategyId = localStorage.getItem('gemini_strategy') || 'none';
+  const strategy = FINANCIAL_STRATEGIES.find(s => s.id === strategyId) || FINANCIAL_STRATEGIES[0];
+
   const [startDate, setStartDate] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
   const [endDate, setEndDate] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
   const [isFilterOpen, setIsFilterOpen] = useState(false);
+
+  // AI State
+  const [aiReport, setAiReport] = useState<AnalystReport | null>(null);
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const [aiError, setAiError] = useState('');
+  const [isAiExpanded, setIsAiExpanded] = useState(false);
 
   const handleMonthSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
@@ -166,6 +176,93 @@ export default function Analytics() {
     percentage: item.percentage,
     label: item.category?.name || 'Неизвестно',
   }));
+
+  // Generate AI Report handler
+  const handleGenerateReport = async () => {
+    setIsAiLoading(true);
+    setAiError('');
+    setIsAiExpanded(true);
+    
+    try {
+      const expenseTxs = transactions.filter(t => t.type === 'expense');
+      const incomeTxs = transactions.filter(t => t.type === 'income');
+
+      // Aggregate incomes
+      const totalIncome = incomeTxs.reduce((acc, t) => acc + (t.currency === 'UZS' ? t.amount : (t.convertedAmount || 0)), 0);
+      
+      const incCatTotals: Record<string, number> = {};
+      incomeTxs.forEach(t => {
+        const amt = t.currency === 'UZS' ? t.amount : (t.convertedAmount || 0);
+        incCatTotals[t.categoryId] = (incCatTotals[t.categoryId] || 0) + amt;
+      });
+      const incomesByCategory = Object.entries(incCatTotals).map(([id, amt]) => ({
+        category: categories.find(c => c.id === id)?.name || 'Неизвестно',
+        amount: amt,
+        percentage: totalIncome > 0 ? Number(((amt / totalIncome) * 100).toFixed(1)) : 0
+      })).sort((a,b) => b.amount - a.amount);
+
+      // Aggregate expenses
+      const totalCategorizedExpenses = expenseTxs.reduce((acc, t) => acc + (t.currency === 'UZS' ? t.amount : (t.convertedAmount || 0)), 0);
+      const expCatTotals: Record<string, number> = {};
+      expenseTxs.forEach(t => {
+        const amt = t.currency === 'UZS' ? t.amount : (t.convertedAmount || 0);
+        expCatTotals[t.categoryId] = (expCatTotals[t.categoryId] || 0) + amt;
+      });
+      const expensesByCategory = Object.entries(expCatTotals).map(([id, amt]) => ({
+        category: categories.find(c => c.id === id)?.name || 'Неизвестно',
+        amount: amt,
+        percentage: totalCategorizedExpenses > 0 ? Number(((amt / totalCategorizedExpenses) * 100).toFixed(1)) : 0
+      })).sort((a,b) => b.amount - a.amount);
+
+      const statsData = {
+        totalExpenses: grandTotal, // Общие расходы (включая пул)
+        categorizedExpensesTotal: totalCategorizedExpenses, // Сумма трат по категориям
+        totalIncome: totalIncome,
+        expensesByCategory,
+        incomesByCategory,
+        usdPoolRemaining
+      };
+
+      const report = await getFinancialAdvice(statsData as any);
+      setAiReport(report);
+    } catch (err: any) {
+      if (err.message.includes('429') || err.message.includes('limit: 0')) {
+        setAiError('Бесплатный лимит недоступен (limit: 0). Пожалуйста, обновите ваш ключ или регион.');
+      } else {
+        setAiError('Ошибка API: ' + (err.message || 'Не удалось составить отчет.'));
+      }
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
+
+  const handleDownloadReport = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!aiReport) return;
+
+    const reportText = `ФИНАНСОВЫЙ AI-ОТЧЕТ
+Период: ${startDate ? format(new Date(startDate), 'dd.MM.yyyy') : '...'} — ${endDate ? format(new Date(endDate), 'dd.MM.yyyy') : '...'}
+
+РЕЗЮМЕ:
+${aiReport.summary}
+
+НАБЛЮДЕНИЯ:
+${aiReport.insights.map(i => '• ' + i).join('\n')}
+
+СОВЕТЫ:
+${aiReport.advice.map(a => '• ' + a).join('\n')}
+    `.trim();
+
+    const blob = new Blob([reportText], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ai-report-${format(new Date(), 'yyyy-MM-dd')}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="page-content animate-fade-in">
@@ -378,6 +475,153 @@ export default function Analytics() {
           </h3>
         </div>
       )}
+
+      {/* ── AI Analyst Section ── */}
+      <div style={{ marginBottom: '24px' }}>
+        <div 
+          onClick={() => {
+            if (!hasGeminiKey()) return;
+            if (!aiReport && !isAiLoading) handleGenerateReport();
+            else setIsAiExpanded(!isAiExpanded);
+          }}
+          style={{
+            background: 'linear-gradient(135deg, rgba(99,102,241,0.1) 0%, rgba(168,85,247,0.15) 100%)',
+            border: '1px solid rgba(168,85,247,0.3)',
+            borderRadius: isAiExpanded ? 'var(--radius-md) var(--radius-md) 0 0' : 'var(--radius-md)',
+            padding: '16px',
+            cursor: hasGeminiKey() ? 'pointer' : 'default',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            transition: 'all 0.3s ease'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', padding: '8px', borderRadius: '50%', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Brain size={20} />
+            </div>
+            <div>
+              <h3 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                AI-Аналитик <Sparkles size={14} color="#a855f7" />
+                {hasGeminiKey() && strategy.id !== 'none' && (
+                  <span style={{ fontSize: '10px', background: 'rgba(168,85,247,0.15)', color: '#a855f7', padding: '2px 6px', borderRadius: '10px', fontWeight: 500 }}>
+                    {strategy.name}
+                  </span>
+                )}
+              </h3>
+              <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: 0, marginTop: '2px' }}>
+                {hasGeminiKey() ? 'Персональные финансовые советы' : 'Требуется API ключ (в Настройках)'}
+              </p>
+            </div>
+          </div>
+          {hasGeminiKey() && (
+            <div>
+              {isAiLoading ? <Loader2 size={20} className="animate-spin" color="#a855f7" /> : (
+                isAiExpanded ? <ChevronUp size={20} color="#a855f7" /> : <ChevronDown size={20} color="#a855f7" />
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* AI Report Content */}
+        {isAiExpanded && (
+          <div style={{
+            background: 'var(--glass-bg)',
+            border: '1px solid rgba(168,85,247,0.3)',
+            borderTop: 'none',
+            borderRadius: '0 0 var(--radius-md) var(--radius-md)',
+            padding: '20px',
+            animation: 'fadeIn 0.3s ease-out'
+          }}>
+            {aiError && (
+              <p style={{ color: 'var(--danger)', fontSize: '13px', textAlign: 'center', margin: 0 }}>{aiError}</p>
+            )}
+            
+            {!aiError && isAiLoading && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', padding: '20px 0' }}>
+                <Loader2 size={28} className="animate-spin" color="#a855f7" />
+                <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Анализирую ваши финансы...</p>
+              </div>
+            )}
+
+            {!aiError && !isAiLoading && aiReport && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div style={{ padding: '12px', background: 'rgba(168,85,247,0.1)', borderRadius: 'var(--radius-sm)' }}>
+                  <p style={{ fontSize: '14px', lineHeight: 1.5, margin: 0, fontWeight: 500, color: 'var(--text-primary)' }}>
+                    {aiReport.summary}
+                  </p>
+                </div>
+
+                <div>
+                  <h4 style={{ fontSize: '13px', fontWeight: 600, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '8px', letterSpacing: '0.5px' }}>
+                    🔍 Наблюдения
+                  </h4>
+                  <ul style={{ margin: 0, paddingLeft: '20px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {aiReport.insights.map((item, idx) => (
+                      <li key={idx} style={{ fontSize: '13px', color: 'var(--text-primary)', lineHeight: 1.4 }}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div>
+                  <h4 style={{ fontSize: '13px', fontWeight: 600, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '8px', letterSpacing: '0.5px' }}>
+                    💡 Советы
+                  </h4>
+                  <ul style={{ margin: 0, paddingLeft: '20px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {aiReport.advice.map((item, idx) => (
+                      <li key={idx} style={{ fontSize: '13px', color: 'var(--text-primary)', lineHeight: 1.4 }}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+
+                {aiReport.usageMetadata && (
+                  <div style={{
+                    marginTop: '4px',
+                    padding: '8px 12px',
+                    background: 'var(--bg-secondary)',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px dashed var(--border-color)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '4px'
+                  }}>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      📊 Потребление токенов (Gemini API)
+                    </span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-primary)' }}>
+                      <span>Входные токены (Prompt):</span>
+                      <span style={{ fontWeight: 600 }}>{aiReport.usageMetadata.promptTokenCount}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-primary)' }}>
+                      <span>Выходные токены (Completion):</span>
+                      <span style={{ fontWeight: 600 }}>{aiReport.usageMetadata.candidatesTokenCount}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', borderTop: '1px solid var(--border-color)', paddingTop: '4px', color: 'var(--text-primary)', marginTop: '2px' }}>
+                      <span style={{ fontWeight: 600 }}>Всего токенов (Total):</span>
+                      <span style={{ fontWeight: 600, color: 'var(--accent-primary)' }}>{aiReport.usageMetadata.totalTokenCount}</span>
+                    </div>
+                  </div>
+                )}
+                
+                <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); handleGenerateReport(); }}
+                    style={{ flex: 1, padding: '8px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)', fontSize: '12px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', border: '1px solid var(--border-color)' }}
+                  >
+                    <Sparkles size={12} /> Обновить
+                  </button>
+                  <button 
+                    onClick={handleDownloadReport}
+                    style={{ flex: 1, padding: '8px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)', fontSize: '12px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-sm)' }}
+                  >
+                    <Download size={12} /> Скачать
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Categories section */}
       <div>

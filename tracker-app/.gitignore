@@ -27,3 +27,15 @@ dist-ssr
 .env
 .env.local
 .env.*
+
+#other 
+*.xlsx
+*.xls
+*.csv
+*.txt
+ai-report-*.txt
+transactions_*.xlsx
+.DS_Store
+*.local
+node_modules/
+dist/
