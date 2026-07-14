@@ -14,17 +14,20 @@ service cloud.firestore {
 
     // Правила для коллекций: транзакции, счета и категории
     match /transactions/{id} {
-      allow read, update, delete: if isOwner(resource.data.userId);
+      allow read, delete: if isOwner(resource.data.userId);
+      allow update: if isOwner(resource.data.userId) && request.resource.data.userId == resource.data.userId;
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
     }
 
     match /accounts/{id} {
-      allow read, update, delete: if isOwner(resource.data.userId);
+      allow read, delete: if isOwner(resource.data.userId);
+      allow update: if isOwner(resource.data.userId) && request.resource.data.userId == resource.data.userId;
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
     }
 
     match /categories/{id} {
-      allow read, update, delete: if isOwner(resource.data.userId);
+      allow read, delete: if isOwner(resource.data.userId);
+      allow update: if isOwner(resource.data.userId) && request.resource.data.userId == resource.data.userId;
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
     }
 

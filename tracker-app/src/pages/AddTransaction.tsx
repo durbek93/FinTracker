@@ -33,6 +33,11 @@ export default function AddTransaction() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
   const [aiSuccess, setAiSuccess] = useState(false);
+  const [aiUsageMetadata, setAiUsageMetadata] = useState<{
+    promptTokenCount: number;
+    candidatesTokenCount: number;
+    totalTokenCount: number;
+  } | null>(null);
 
   const todayStr = format(new Date(), 'yyyy-MM-dd');
 
@@ -199,6 +204,7 @@ export default function AddTransaction() {
     setAiLoading(true);
     setAiError('');
     setAiSuccess(false);
+    setAiUsageMetadata(null);
     try {
       const categoryNames = categories.map(c => c.name);
       // Передаем текущую дату и время для относительного парсинга
@@ -217,8 +223,13 @@ export default function AddTransaction() {
         throw new Error('Не удалось точно определить категорию. Попробуйте сформулировать иначе.');
       }
 
+      const parsedAmount = Number(parsed.amount);
+      if (isNaN(parsedAmount) || parsedAmount <= 0) {
+        throw new Error('Не удалось распознать сумму операции. Пожалуйста, убедитесь, что указали корректную сумму цифрами.');
+      }
+
       const payload: Omit<Transaction, 'id'> = {
-        amount: Number(parsed.amount),
+        amount: parsedAmount,
         currency: parsed.currency,
         categoryId: matchedCategoryId,
         accountId: accountId,
@@ -241,6 +252,7 @@ export default function AddTransaction() {
 
       setAiText('');
       setAiSuccess(true);
+      setAiUsageMetadata(parsed.usageMetadata || null);
       setTimeout(() => setAiSuccess(false), 2500);
     } catch (err) {
       const error = err as Error;
@@ -345,6 +357,23 @@ export default function AddTransaction() {
             <p style={{ fontSize: '11px', color: 'rgba(129,140,248,0.7)', margin: 0 }}>
               Опишите операцию свободным текстом, IA заполнит форму автоматически
             </p>
+          )}
+          {aiUsageMetadata && (
+            <div style={{
+              fontSize: '11px',
+              color: 'var(--text-muted)',
+              display: 'flex',
+              gap: '12px',
+              marginTop: '4px',
+              background: 'rgba(0,0,0,0.1)',
+              padding: '6px 10px',
+              borderRadius: 'var(--radius-sm)',
+              width: 'fit-content'
+            }}>
+              <span>Prompt: <b>{aiUsageMetadata.promptTokenCount}</b></span>
+              <span>Completion: <b>{aiUsageMetadata.candidatesTokenCount}</b></span>
+              <span>Total: <b style={{ color: '#a855f7' }}>{aiUsageMetadata.totalTokenCount}</b></span>
+            </div>
           )}
         </div>
       )}

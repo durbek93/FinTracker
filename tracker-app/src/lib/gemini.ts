@@ -174,11 +174,15 @@ export interface FinancialStats {
 }
 
 export const getFinancialAdvice = async (
-  stats: FinancialStats
+  stats: FinancialStats,
+  strategyId: string = 'none',
+  personalInstructions: string = ''
 ): Promise<AnalystReport> => {
   const client = getClient();
   
-  const systemInstruction = `Ты — опытный финансовый советник. Проанализируй агрегированную статистику пользователя за выбранный период и верни персональные советы по оптимизации бюджета в формате JSON.
+  const strategy = FINANCIAL_STRATEGIES.find(s => s.id === strategyId) || FINANCIAL_STRATEGIES[0];
+
+  let systemInstruction = `Ты — опытный финансовый советник. Проанализируй агрегированную статистику пользователя за выбранный период и верни персональные советы по оптимизации бюджета в формате JSON.
 Нейросетям сложно считать точные суммы, поэтому тебе передаются уже посчитанные итоговые цифры. Опирайся строго на них.
 
 Ответ должен быть строго в формате JSON:
@@ -193,23 +197,19 @@ export const getFinancialAdvice = async (
 - Будь конкретным, конструктивным и дружелюбным.
 - Ответ должен содержать ТОЛЬКО валидный JSON-объект без разметки markdown (без \`\`\`json ... \`\`\`).`;
 
+  if (strategy.id !== 'none') {
+    systemInstruction += `\n\nФИНАНСОВАЯ СТРАТЕГИЯ ПОЛЬЗОВАТЕЛЯ:\n${strategy.instruction}`;
+  }
+  if (personalInstructions.trim()) {
+    systemInstruction += `\n\nДОПОЛНИТЕЛЬНЫЕ УКАЗАНИЯ ПОЛЬЗОВАТЕЛЯ:\n${personalInstructions.trim()}`;
+  }
+
   const model = client.getGenerativeModel({ 
     model: 'gemini-2.5-flash',
     systemInstruction
   });
 
-  const strategyId = localStorage.getItem('gemini_strategy') || 'none';
-  const strategy = FINANCIAL_STRATEGIES.find(s => s.id === strategyId) || FINANCIAL_STRATEGIES[0];
-  const personalInstructions = localStorage.getItem('gemini_instructions') || '';
-
-  let prompt = '';
-  if (strategy.id !== 'none') {
-    prompt += `ФИНАНСОВАЯ СТРАТЕГИЯ ПОЛЬЗОВАТЕЛЯ:\n${strategy.instruction}\n\n`;
-  }
-  if (personalInstructions.trim()) {
-    prompt += `ДОПОЛНИТЕЛЬНЫЕ УКАЗАНИЯ ПОЛЬЗОВАТЕЛЯ:\n${personalInstructions.trim()}\n\n`;
-  }
-  prompt += `Статистика расходов и доходов:\n${JSON.stringify(stats, null, 2)}`;
+  const prompt = `Статистика расходов и доходов:\n${JSON.stringify(stats, null, 2)}`;
 
   const result = await model.generateContent(prompt);
   const raw = result.response.text().trim();

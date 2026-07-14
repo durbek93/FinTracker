@@ -4,7 +4,8 @@ import { useStore } from '../store';
 import { getIcon } from '../lib/icons';
 import { PieChart, BarChart2, TrendingDown, Calendar, Brain, Sparkles, Loader2, ChevronDown, ChevronUp, Download } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, startOfDay, endOfDay, isValid } from 'date-fns';
-import { getFinancialAdvice, AnalystReport, hasGeminiKey, FINANCIAL_STRATEGIES } from '../lib/gemini';
+import { getFinancialAdvice, AnalystReport, hasGeminiKey } from '../lib/gemini';
+import { useFinancialStrategy } from '../hooks/useFinancialStrategy';
 
 const formatCurrency = (amount: number, currency: string) => {
   return new Intl.NumberFormat('ru-RU').format(Math.round(amount)) + ' ' + currency;
@@ -65,8 +66,7 @@ export default function Analytics() {
   const { transactions: storeTransactions, categories } = useStore();
   const navigate = useNavigate();
 
-  const strategyId = localStorage.getItem('gemini_strategy') || 'none';
-  const strategy = FINANCIAL_STRATEGIES.find(s => s.id === strategyId) || FINANCIAL_STRATEGIES[0];
+  const { strategyId, currentStrategy: strategy, personalInstructions } = useFinancialStrategy();
 
   const [startDate, setStartDate] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
   const [endDate, setEndDate] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
@@ -223,7 +223,7 @@ export default function Analytics() {
         usdPoolRemaining
       };
 
-      const report = await getFinancialAdvice(statsData);
+      const report = await getFinancialAdvice(statsData, strategyId, personalInstructions);
       setAiReport(report);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);

@@ -128,11 +128,11 @@ export const telegramWebhook = onRequest(
         res.status(200).send("OK");
         return;
       }
-
       res.status(200).send("OK");
     } catch (error: unknown) {
       console.error("Error in webhook execution:", error);
-      res.status(500).send("Internal Error");
+      // Always return 200 OK to Telegram to prevent retry loops on execution errors
+      res.status(200).send("OK");
     }
   }
 );
@@ -557,14 +557,19 @@ async function processParsedTransaction(
     };
 
     const geminiKey = GEMINI_API_KEY.value();
-    const adviceText = await generateFinancialAdviceText(
+    const adviceResponse = await generateFinancialAdviceText(
       geminiKey,
       stats,
       strategyId,
       personalInstructions
     );
 
-    if (adviceText) {
+    if (adviceResponse && adviceResponse.adviceText) {
+      const { adviceText, usageMetadata } = adviceResponse;
+      if (usageMetadata) {
+        console.log(`[Gemini Bot Advice] Tokens: prompt=${usageMetadata.promptTokenCount}, candidates=${usageMetadata.candidatesTokenCount}, total=${usageMetadata.totalTokenCount}`);
+      }
+
       if (statusMsgId) {
         await editMessageText(botToken, chatId, statusMsgId, adviceText);
       } else {
@@ -598,7 +603,19 @@ async function processParsedTransaction(
   }
 
   // Extract variables
-  const amount = Number(parsedJson.amount);
+  const rawAmount = Number(parsedJson.amount);
+  if (isNaN(rawAmount) || rawAmount <= 0) {
+    console.error("Invalid transaction amount received from Gemini:", parsedJson.amount);
+    const errorMsg = "❌ Не удалось распознать сумму транзакции. Пожалуйста, укажите сумму цифрами.";
+    if (botMessageId) {
+      await editMessageText(botToken, chatId, botMessageId, errorMsg);
+    } else {
+      await sendTelegramMessage(botToken, chatId, errorMsg);
+    }
+    return;
+  }
+
+  const amount = rawAmount;
   const currency = parsedJson.currency === "USD" ? "USD" : "UZS";
   const type = parsedJson.type === "income" ? "income" : "expense";
   const note = parsedJson.note || "";

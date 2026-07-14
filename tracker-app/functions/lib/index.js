@@ -94,7 +94,8 @@ exports.telegramWebhook = (0, https_1.onRequest)({ secrets: [TELEGRAM_BOT_TOKEN,
     }
     catch (error) {
         console.error("Error in webhook execution:", error);
-        res.status(500).send("Internal Error");
+        // Always return 200 OK to Telegram to prevent retry loops on execution errors
+        res.status(200).send("OK");
     }
 });
 // Process /start command with atomic transactions and link expiration
@@ -382,8 +383,12 @@ async function processParsedTransaction(chatId, userMessageId, botMessageId, par
             incomesByCategory
         };
         const geminiKey = GEMINI_API_KEY.value();
-        const adviceText = await (0, gemini_1.generateFinancialAdviceText)(geminiKey, stats, strategyId, personalInstructions);
-        if (adviceText) {
+        const adviceResponse = await (0, gemini_1.generateFinancialAdviceText)(geminiKey, stats, strategyId, personalInstructions);
+        if (adviceResponse && adviceResponse.adviceText) {
+            const { adviceText, usageMetadata } = adviceResponse;
+            if (usageMetadata) {
+                console.log(`[Gemini Bot Advice] Tokens: prompt=${usageMetadata.promptTokenCount}, candidates=${usageMetadata.candidatesTokenCount}, total=${usageMetadata.totalTokenCount}`);
+            }
             if (statusMsgId) {
                 await (0, telegram_1.editMessageText)(botToken, chatId, statusMsgId, adviceText);
             }
@@ -419,7 +424,19 @@ async function processParsedTransaction(chatId, userMessageId, botMessageId, par
         return;
     }
     // Extract variables
-    const amount = Number(parsedJson.amount);
+    const rawAmount = Number(parsedJson.amount);
+    if (isNaN(rawAmount) || rawAmount <= 0) {
+        console.error("Invalid transaction amount received from Gemini:", parsedJson.amount);
+        const errorMsg = "❌ Не удалось распознать сумму транзакции. Пожалуйста, укажите сумму цифрами.";
+        if (botMessageId) {
+            await (0, telegram_1.editMessageText)(botToken, chatId, botMessageId, errorMsg);
+        }
+        else {
+            await (0, telegram_1.sendTelegramMessage)(botToken, chatId, errorMsg);
+        }
+        return;
+    }
+    const amount = rawAmount;
     const currency = parsedJson.currency === "USD" ? "USD" : "UZS";
     const type = parsedJson.type === "income" ? "income" : "expense";
     const note = parsedJson.note || "";

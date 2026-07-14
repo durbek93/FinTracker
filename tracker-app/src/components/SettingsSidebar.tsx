@@ -5,6 +5,7 @@ import { useStore } from '../store';
 import { isAccountProtected } from '../types';
 import { auth } from '../firebase';
 import { getGeminiKey, setGeminiKey, removeGeminiKey, hasGeminiKey, FINANCIAL_STRATEGIES } from '../lib/gemini';
+import { useFinancialStrategy } from '../hooks/useFinancialStrategy';
 import { 
   GoogleAuthProvider, 
   EmailAuthProvider, 
@@ -49,8 +50,17 @@ export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProp
   const [apiKeyInput, setApiKeyInput] = useState(() => getGeminiKey() || '');
   const [showKey, setShowKey] = useState(false);
   const [keySaved, setKeySaved] = useState(hasGeminiKey);
-  const [aiInstructions, setAiInstructions] = useState(() => localStorage.getItem('gemini_instructions') || '');
-  const [selectedStrategy, setSelectedStrategy] = useState(() => localStorage.getItem('gemini_strategy') || 'none');
+  const { strategyId, personalInstructions, saveSettings: persistSettings } = useFinancialStrategy();
+  const [aiInstructions, setAiInstructions] = useState(personalInstructions);
+  const [selectedStrategy, setSelectedStrategy] = useState(strategyId);
+
+  useEffect(() => {
+    setSelectedStrategy(strategyId);
+  }, [strategyId]);
+
+  useEffect(() => {
+    setAiInstructions(personalInstructions);
+  }, [personalInstructions]);
 
   const handleSaveKey = () => {
     if (apiKeyInput.trim().length > 10) {
@@ -81,49 +91,7 @@ export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProp
     }
   }, [theme]);
 
-  // Load financial strategy settings from Firestore on mount
-  useEffect(() => {
-    if (!isOpen || !auth.currentUser) return;
 
-    const loadUserSettings = async () => {
-      try {
-        const { doc, getDoc } = await import('firebase/firestore');
-        const { db } = await import('../firebase');
-        const docRef = doc(db, 'userSettings', auth.currentUser!.uid);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          if (data.strategyId) {
-            setSelectedStrategy(data.strategyId);
-            localStorage.setItem('gemini_strategy', data.strategyId);
-          }
-          if (data.personalInstructions !== undefined) {
-            setAiInstructions(data.personalInstructions);
-            localStorage.setItem('gemini_instructions', data.personalInstructions);
-          }
-        }
-      } catch (e) {
-        console.error("Failed to load user settings:", e);
-      }
-    };
-
-    loadUserSettings();
-  }, [isOpen]);
-
-  const saveSettings = async (strategyId: string, instructions: string) => {
-    if (!auth.currentUser) return;
-    try {
-      const { doc, setDoc } = await import('firebase/firestore');
-      const { db } = await import('../firebase');
-      await setDoc(doc(db, 'userSettings', auth.currentUser.uid), {
-        strategyId,
-        personalInstructions: instructions,
-        updatedAt: new Date()
-      }, { merge: true });
-    } catch (e) {
-      console.error("Failed to save user settings:", e);
-    }
-  };
 
   // Read current providers on mount and when loading changes
   useEffect(() => {
@@ -660,7 +628,7 @@ export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProp
                   onChange={(e) => {
                     setSelectedStrategy(e.target.value);
                     localStorage.setItem('gemini_strategy', e.target.value);
-                    saveSettings(e.target.value, aiInstructions);
+                    persistSettings(e.target.value, aiInstructions);
                   }}
                   style={{
                     width: '100%',
@@ -693,7 +661,7 @@ export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProp
                     localStorage.setItem('gemini_instructions', e.target.value);
                   }}
                   onBlur={(e) => {
-                    saveSettings(selectedStrategy, e.target.value);
+                    persistSettings(selectedStrategy, e.target.value);
                   }}
                   placeholder="Пример: Обращайся на 'вы', делай упор на долгосрочные цели..."
                   style={{

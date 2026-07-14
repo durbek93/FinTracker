@@ -1,5 +1,11 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
+export interface UsageMetadata {
+  promptTokenCount: number;
+  candidatesTokenCount: number;
+  totalTokenCount: number;
+}
+
 export interface ParsedTransaction {
   intent: "add_transaction" | "check_balance" | "get_advice" | "other";
   amount?: number;
@@ -10,6 +16,7 @@ export interface ParsedTransaction {
   note?: string;
   date?: string; // YYYY-MM-DD
   time?: string; // HH:mm
+  usageMetadata?: UsageMetadata;
 }
 
 const SYSTEM_INSTRUCTION = `Ты — специализированный финансовый ассистент. Твоя задача — проанализировать входящее сообщение пользователя (текст или аудио) и определить его намерение (intent).
@@ -63,7 +70,17 @@ export async function parseTransactionTextWithGemini(
     });
 
     const rawText = result.response.text().trim();
-    return JSON.parse(rawText) as ParsedTransaction;
+    const parsed = JSON.parse(rawText) as ParsedTransaction;
+    const usage = result.response.usageMetadata;
+    if (usage) {
+      console.log(`[Gemini Parse Text] Tokens: prompt=${usage.promptTokenCount}, candidates=${usage.candidatesTokenCount}, total=${usage.totalTokenCount}`);
+      parsed.usageMetadata = {
+        promptTokenCount: usage.promptTokenCount,
+        candidatesTokenCount: usage.candidatesTokenCount,
+        totalTokenCount: usage.totalTokenCount
+      };
+    }
+    return parsed;
   } catch (err) {
     console.error("Gemini Parse Error:", err);
     return null;
@@ -117,7 +134,17 @@ export async function parseTransactionAudioWithGemini(
     });
 
     const rawText = result.response.text().trim();
-    return JSON.parse(rawText) as ParsedTransaction;
+    const parsed = JSON.parse(rawText) as ParsedTransaction;
+    const usage = result.response.usageMetadata;
+    if (usage) {
+      console.log(`[Gemini Parse Audio] Tokens: prompt=${usage.promptTokenCount}, candidates=${usage.candidatesTokenCount}, total=${usage.totalTokenCount}`);
+      parsed.usageMetadata = {
+        promptTokenCount: usage.promptTokenCount,
+        candidatesTokenCount: usage.candidatesTokenCount,
+        totalTokenCount: usage.totalTokenCount
+      };
+    }
+    return parsed;
   } catch (err) {
     console.error("Gemini Audio Parse Error:", err);
     return null;
@@ -164,6 +191,11 @@ export const FINANCIAL_STRATEGIES: FinancialStrategy[] = [
   }
 ];
 
+export interface FinancialAdviceResponse {
+  adviceText: string;
+  usageMetadata?: UsageMetadata;
+}
+
 /**
  * Generates custom markdown financial advice text using Gemini.
  */
@@ -177,12 +209,12 @@ export async function generateFinancialAdviceText(
   },
   strategyId: string,
   personalInstructions: string
-): Promise<string | null> {
+): Promise<FinancialAdviceResponse | null> {
   try {
     const ai = new GoogleGenerativeAI(geminiKey);
-    const model = ai.getGenerativeModel({
-      model: "gemini-2.5-flash",
-      systemInstruction: `Ты — опытный и дружелюбный финансовый советник. Проанализируй финансовую статистику пользователя за текущий месяц и составь персонализированный отчет и рекомендации на русском языке.
+    const strategy = FINANCIAL_STRATEGIES.find(s => s.id === strategyId) || FINANCIAL_STRATEGIES[0];
+
+    let systemInstruction = `Ты — опытный и дружелюбный финансовый советник. Проанализируй финансовую статистику пользователя за текущий месяц и составь персонализированный отчет и рекомендации на русском языке.
       
 Форматируй отчет с использованием Markdown для Telegram:
 - Используй эмодзи для наглядности.
@@ -192,22 +224,35 @@ export async function generateFinancialAdviceText(
 Отчет должен содержать:
 1. Краткий анализ общей картины (доходы vs расходы за месяц).
 2. Несколько важных наблюдений о тратах (например, в каких категориях тратится больше всего).
-3. Действенные и конкретные финансовые советы по экономии и накоплению, основанные на выбранной стратегии пользователя.`
-    });
+3. Действенные и конкретные финансовые советы по экономии и накоплению, основанные на выбранной стратегии пользователя.`;
 
-    const strategy = FINANCIAL_STRATEGIES.find(s => s.id === strategyId) || FINANCIAL_STRATEGIES[0];
-
-    let prompt = "";
     if (strategy.id !== "none") {
-      prompt += `ФИНАНСОВАЯ СТРАТЕГИЯ ПОЛЬЗОВАТЕЛЯ: ${strategy.name}\nИнструкция стратегии: ${strategy.instruction}\n\n`;
+      systemInstruction += `\n\nФИНАНСОВАЯ СТРАТЕГИЯ ПОЛЬЗОВАТЕЛЯ: ${strategy.name}\nИнструкция стратегии: ${strategy.instruction}`;
     }
     if (personalInstructions && personalInstructions.trim()) {
-      prompt += `ДОПОЛНИТЕЛЬНЫЕ УКАЗАНИЯ ПОЛЬЗОВАТЕЛЯ:\n${personalInstructions.trim()}\n\n`;
+      systemInstruction += `\n\nДОПОЛНИТЕЛЬНЫЕ УКАЗАНИЯ ПОЛЬЗОВАТЕЛЯ:\n${personalInstructions.trim()}`;
     }
-    prompt += `Статистика расходов и доходов за текущий месяц:\n${JSON.stringify(stats, null, 2)}`;
+
+    const model = ai.getGenerativeModel({
+      model: "gemini-2.5-flash",
+      systemInstruction
+    });
+
+    const prompt = `Статистика расходов и доходов за текущий месяц:\n${JSON.stringify(stats, null, 2)}`;
 
     const result = await model.generateContent(prompt);
-    return result.response.text().trim();
+    const adviceText = result.response.text().trim();
+    const usage = result.response.usageMetadata;
+
+    const response: FinancialAdviceResponse = { adviceText };
+    if (usage) {
+      response.usageMetadata = {
+        promptTokenCount: usage.promptTokenCount,
+        candidatesTokenCount: usage.candidatesTokenCount,
+        totalTokenCount: usage.totalTokenCount
+      };
+    }
+    return response;
   } catch (err) {
     console.error("Gemini Advice Error:", err);
     return null;
