@@ -3,7 +3,7 @@ import { useStore } from '../store';
 import { getIcon, AVAILABLE_ICON_NAMES } from '../lib/icons';
 import { ArrowLeft, Plus, Edit2, Trash2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { TransactionType } from '../types';
+import { TransactionType, Category } from '../types';
 
 const COLORS = [
   '#f59e0b', '#f97316', '#3b82f6', '#8b5cf6', '#eab308', 
@@ -32,7 +32,7 @@ export default function Categories() {
     setIsModalOpen(true);
   };
 
-  const openEdit = (c: any) => {
+  const openEdit = (c: Category) => {
     setEditingId(c.id);
     setName(c.name);
     setColor(c.color);

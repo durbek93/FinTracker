@@ -1,8 +1,16 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { Transaction, Account, Currency, isAccountProtected, Category } from './types';
 import { db, collection, addDoc, onSnapshot, query, deleteDoc, doc, updateDoc, setDoc, where, getDocs, auth } from './firebase';
-import { User, onAuthStateChanged } from 'firebase/auth';
+import { User, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { DEFAULT_CATEGORIES } from './categories';
+
+const getAuthTelegramUrl = () => {
+  const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID;
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    return `http://localhost:5001/${projectId}/us-central1/authTelegram`;
+  }
+  return `https://us-central1-${projectId}.cloudfunctions.net/authTelegram`;
+};
 
 interface StoreState {
   currentUser: User | null;
@@ -33,6 +41,50 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
   const [authChecked, setAuthChecked] = useState(false);
 
+  // Monitor Telegram WebApp authentication
+  useEffect(() => {
+    const tg = (window as any).Telegram?.WebApp;
+    if (tg && tg.initData) {
+      console.log("Telegram WebApp detected. Starting automatic custom token login...");
+      
+      // Expand WebApp viewport automatically
+      tg.expand();
+      
+      const authenticateTelegram = async () => {
+        try {
+          const url = getAuthTelegramUrl();
+          const timezoneOffset = new Date().getTimezoneOffset();
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ data: { initData: tg.initData, timezoneOffset } })
+          });
+          
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          
+          const resJson = await response.json();
+          if (resJson.error) {
+            throw new Error(resJson.error.message || "Failed to authenticate via Telegram");
+          }
+          
+          const customToken = resJson.result?.customToken;
+          if (customToken) {
+            await signInWithCustomToken(auth, customToken);
+            console.log("Logged in successfully via Telegram Custom Token");
+          }
+        } catch (error) {
+          console.error("Telegram Auth failed:", error);
+        }
+      };
+      
+      authenticateTelegram();
+    }
+  }, []);
+
   // Monitor auth state
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -56,8 +108,8 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
         const migrateCollection = async (collName: string) => {
           const snap = await getDocs(collection(db, collName));
           const promises: Promise<void>[] = [];
-          snap.forEach((d: any) => {
-            const data = d.data();
+          snap.forEach((d) => {
+            const data = d.data() as { userId?: string };
             if (!data.userId) {
               promises.push(updateDoc(doc(db, collName, d.id), { userId: currentUser.uid }));
             }

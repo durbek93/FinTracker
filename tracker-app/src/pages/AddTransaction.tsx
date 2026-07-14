@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useStore } from '../store';
 import { getIcon } from '../lib/icons';
 import { format } from 'date-fns';
-import { TransactionType, Currency } from '../types';
+import { TransactionType, Currency, Transaction } from '../types';
 import { ArrowRightLeft, ArrowLeft, Sparkles, Loader2 } from 'lucide-react';
 import { parseTransactionText, hasGeminiKey } from '../lib/gemini';
 
@@ -125,7 +125,7 @@ export default function AddTransaction() {
        return;
     }
 
-    const payload: any = {
+    const payload: Omit<Transaction, 'id'> = {
       amount: Number(amount),
       currency,
       categoryId: type === 'transfer' ? '' : categoryId,
@@ -217,7 +217,7 @@ export default function AddTransaction() {
         throw new Error('Не удалось точно определить категорию. Попробуйте сформулировать иначе.');
       }
 
-      const payload: any = {
+      const payload: Omit<Transaction, 'id'> = {
         amount: Number(parsed.amount),
         currency: parsed.currency,
         categoryId: matchedCategoryId,
@@ -242,13 +242,14 @@ export default function AddTransaction() {
       setAiText('');
       setAiSuccess(true);
       setTimeout(() => setAiSuccess(false), 2500);
-    } catch (err: any) {
-      if (err.message === 'NO_API_KEY') {
+    } catch (err) {
+      const error = err as Error;
+      if (error.message === 'NO_API_KEY') {
         setAiError('Не найден API ключ. Добавьте его в Настройках → AI-помощник.');
-      } else if (err.message.includes('429') || err.message.includes('limit: 0')) {
+      } else if (error.message.includes('429') || error.message.includes('limit: 0')) {
         setAiError('Бесплатный лимит недоступен (limit: 0). Возможно, ваш регион не поддерживает Free Tier или нужно привязать карту в Google Cloud.');
       } else {
-        setAiError('Ошибка API: ' + (err.message || 'Не удалось распознать операцию.'));
+        setAiError('Ошибка API: ' + (error.message || 'Не удалось распознать операцию.'));
       }
     } finally {
       setAiLoading(false);

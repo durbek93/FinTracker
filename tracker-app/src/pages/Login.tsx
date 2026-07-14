@@ -12,8 +12,8 @@ import { Mail, Phone, Lock, Hash, ArrowRight, ShieldCheck, Loader2 } from 'lucid
 
 declare global {
   interface Window {
-    recaptchaVerifier: any;
-    confirmationResult: any;
+    recaptchaVerifier: RecaptchaVerifier | null;
+    confirmationResult: ConfirmationResult | null;
   }
 }
 
@@ -68,16 +68,17 @@ export default function Login() {
         await signInWithEmailAndPassword(auth, email, password);
       }
       navigate('/');
-    } catch (err: any) {
-      console.error(err);
-      if (err.code === 'auth/user-not-found') {
+    } catch (err) {
+      const error = err as { code?: string; message?: string };
+      console.error(error);
+      if (error.code === 'auth/user-not-found') {
         setError('Пользователь с таким email не найден. Попробуйте зарегистрироваться.');
-      } else if (err.code === 'auth/wrong-password') {
+      } else if (error.code === 'auth/wrong-password') {
         setError('Неверный пароль.');
-      } else if (err.code === 'auth/email-already-in-use') {
+      } else if (error.code === 'auth/email-already-in-use') {
         setError('Этот email уже зарегистрирован. Попробуйте войти.');
       } else {
-        setError('Ошибка авторизации: ' + err.message);
+        setError('Ошибка авторизации: ' + (error.message || String(err)));
       }
     } finally {
       setIsLoading(false);
@@ -90,12 +91,14 @@ export default function Login() {
     setError('');
     try {
       const appVerifier = window.recaptchaVerifier;
+      if (!appVerifier) throw new Error('reCAPTCHA не инициализирован');
       const result = await signInWithPhoneNumber(auth, phone, appVerifier);
       setConfirmationResult(result);
       window.confirmationResult = result;
-    } catch (err: any) {
-      console.error(err);
-      setError('Ошибка отправки СМС: ' + err.message);
+    } catch (err) {
+      const error = err as { message?: string };
+      console.error(error);
+      setError('Ошибка отправки СМС: ' + (error.message || String(err)));
       if (window.recaptchaVerifier) {
         window.recaptchaVerifier.clear();
         window.recaptchaVerifier = null;
@@ -113,13 +116,30 @@ export default function Login() {
     try {
       await confirmationResult.confirm(verificationCode);
       navigate('/');
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
       setError('Неверный код авторизации.');
     } finally {
       setIsLoading(false);
     }
   };
+
+  const tg = (window as any).Telegram?.WebApp;
+  const isTelegram = tg && tg.initData;
+
+  if (isTelegram) {
+    return (
+      <div className="app-container" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '80vh', padding: '20px' }}>
+        <div className="glass-panel" style={{ width: '100%', maxWidth: '400px', padding: '40px', textAlign: 'center' }}>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
+            <Loader2 size={48} className="animate-spin" style={{ color: 'var(--accent-primary)' }} />
+          </div>
+          <h2 style={{ fontSize: '20px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px' }}>Вход через Telegram</h2>
+          <p className="text-muted" style={{ fontSize: '15px' }}>Выполняется бесшовная авторизация в системе...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>

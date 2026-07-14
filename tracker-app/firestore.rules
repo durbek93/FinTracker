@@ -1,0 +1,45 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Функция проверки: авторизован ли пользователь
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Функция проверки: принадлежит ли документ текущему пользователю
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Правила для коллекций: транзакции, счета и категории
+    match /transactions/{id} {
+      allow read, update, delete: if isOwner(resource.data.userId);
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+    }
+
+    match /accounts/{id} {
+      allow read, update, delete: if isOwner(resource.data.userId);
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+    }
+
+    match /categories/{id} {
+      allow read, update, delete: if isOwner(resource.data.userId);
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+    }
+
+    // Правила для привязки Telegram
+    match /linkCodes/{code} {
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow read, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /telegramUsers/{telegramId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /userSettings/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+  }
+}

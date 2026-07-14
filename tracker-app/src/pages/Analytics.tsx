@@ -223,13 +223,14 @@ export default function Analytics() {
         usdPoolRemaining
       };
 
-      const report = await getFinancialAdvice(statsData as any);
+      const report = await getFinancialAdvice(statsData);
       setAiReport(report);
-    } catch (err: any) {
-      if (err.message.includes('429') || err.message.includes('limit: 0')) {
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      if (errorMessage.includes('429') || errorMessage.includes('limit: 0')) {
         setAiError('Бесплатный лимит недоступен (limit: 0). Пожалуйста, обновите ваш ключ или регион.');
       } else {
-        setAiError('Ошибка API: ' + (err.message || 'Не удалось составить отчет.'));
+        setAiError('Ошибка API: ' + (errorMessage || 'Не удалось составить отчет.'));
       }
     } finally {
       setIsAiLoading(false);

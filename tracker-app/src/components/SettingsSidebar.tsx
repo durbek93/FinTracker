@@ -19,8 +19,8 @@ import {
 
 declare global {
   interface Window {
-    settingsRecaptchaVerifier: any;
-    settingsConfirmationResult: any;
+    settingsRecaptchaVerifier: RecaptchaVerifier | null;
+    settingsConfirmationResult: ConfirmationResult | null;
   }
 }
 
@@ -81,6 +81,50 @@ export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProp
     }
   }, [theme]);
 
+  // Load financial strategy settings from Firestore on mount
+  useEffect(() => {
+    if (!isOpen || !auth.currentUser) return;
+
+    const loadUserSettings = async () => {
+      try {
+        const { doc, getDoc } = await import('firebase/firestore');
+        const { db } = await import('../firebase');
+        const docRef = doc(db, 'userSettings', auth.currentUser!.uid);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (data.strategyId) {
+            setSelectedStrategy(data.strategyId);
+            localStorage.setItem('gemini_strategy', data.strategyId);
+          }
+          if (data.personalInstructions !== undefined) {
+            setAiInstructions(data.personalInstructions);
+            localStorage.setItem('gemini_instructions', data.personalInstructions);
+          }
+        }
+      } catch (e) {
+        console.error("Failed to load user settings:", e);
+      }
+    };
+
+    loadUserSettings();
+  }, [isOpen]);
+
+  const saveSettings = async (strategyId: string, instructions: string) => {
+    if (!auth.currentUser) return;
+    try {
+      const { doc, setDoc } = await import('firebase/firestore');
+      const { db } = await import('../firebase');
+      await setDoc(doc(db, 'userSettings', auth.currentUser.uid), {
+        strategyId,
+        personalInstructions: instructions,
+        updatedAt: new Date()
+      }, { merge: true });
+    } catch (e) {
+      console.error("Failed to save user settings:", e);
+    }
+  };
+
   // Read current providers on mount and when loading changes
   useEffect(() => {
     if (auth.currentUser) {
@@ -102,6 +146,58 @@ export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProp
     }
   }, [activeLinkForm]);
 
+  // Telegram linking states
+  const [tgLinked, setTgLinked] = useState<boolean>(false);
+  const [tgId, setTgId] = useState<string>('');
+  const [tgLinkCode, setTgLinkCode] = useState<string>('');
+  const [tgLoading, setTgLoading] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!isOpen || !auth.currentUser) return;
+
+    const checkTelegramLink = async () => {
+      try {
+        const { getDocs, query, collection, where } = await import('firebase/firestore');
+        const { db } = await import('../firebase');
+        const q = query(collection(db, 'telegramUsers'), where('userId', '==', auth.currentUser!.uid));
+        const snap = await getDocs(q);
+        if (!snap.empty) {
+          setTgLinked(true);
+          setTgId(snap.docs[0].id);
+        } else {
+          setTgLinked(false);
+          setTgId('');
+        }
+      } catch (e) {
+        console.error("Failed to check Telegram link:", e);
+      }
+    };
+
+    checkTelegramLink();
+  }, [isOpen, linkingLoading]);
+
+  const handleGenerateTelegramCode = async () => {
+    if (!auth.currentUser) return;
+    setTgLoading(true);
+    try {
+      const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+      const { doc, setDoc } = await import('firebase/firestore');
+      const { db } = await import('../firebase');
+      
+      await setDoc(doc(db, 'linkCodes', code), {
+        userId: auth.currentUser.uid,
+        createdAt: new Date()
+      });
+      
+      setTgLinkCode(code);
+    } catch (e) {
+      console.error("Failed to generate Telegram code:", e);
+      alert("Ошибка при создании кода привязки.");
+    } finally {
+      setTgLoading(false);
+    }
+  };
+
   if (!isOpen) {
     if (activeLinkForm) setActiveLinkForm(null);
     if (linkError) setLinkError('');
@@ -114,9 +210,10 @@ export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProp
     try {
       const provider = new GoogleAuthProvider();
       await linkWithPopup(auth.currentUser!, provider);
-    } catch (e: any) {
-      console.error(e);
-      setLinkError(e.code === 'auth/credential-already-in-use' ? 'Этот Google аккаунт уже зарегистрирован в другом профиле.' : e.message);
+    } catch (e) {
+      const err = e as { code?: string; message?: string };
+      console.error(err);
+      setLinkError(err.code === 'auth/credential-already-in-use' ? 'Этот Google аккаунт уже зарегистрирован в другом профиле.' : (err.message || String(e)));
     } finally {
       setLinkingLoading(null);
     }
@@ -130,9 +227,10 @@ export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProp
       const credential = EmailAuthProvider.credential(linkEmail, linkPassword);
       await linkWithCredential(auth.currentUser!, credential);
       setActiveLinkForm(null);
-    } catch (e: any) {
-      console.error(e);
-      setLinkError(e.code === 'auth/email-already-in-use' ? 'Этот Email уже существует.' : e.message);
+    } catch (e) {
+      const err = e as { code?: string; message?: string };
+      console.error(err);
+      setLinkError(err.code === 'auth/email-already-in-use' ? 'Этот Email уже существует.' : (err.message || String(e)));
     } finally {
       setLinkingLoading(null);
     }
@@ -144,12 +242,14 @@ export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProp
     setLinkError('');
     try {
       const appVerifier = window.settingsRecaptchaVerifier;
+      if (!appVerifier) throw new Error('reCAPTCHA не инициализирован');
       const result = await signInWithPhoneNumber(auth, linkPhone, appVerifier);
       setConfirmationResult(result);
       window.settingsConfirmationResult = result;
-    } catch (err: any) {
+    } catch (e) {
+      const err = e as { message?: string };
       console.error(err);
-      setLinkError('Ошибка отправки СМС: ' + err.message);
+      setLinkError('Ошибка отправки СМС: ' + (err.message || String(e)));
       if (window.settingsRecaptchaVerifier) {
         window.settingsRecaptchaVerifier.clear();
         window.settingsRecaptchaVerifier = null;
@@ -169,7 +269,8 @@ export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProp
       await linkWithCredential(auth.currentUser!, credential);
       setActiveLinkForm(null);
       setConfirmationResult(null);
-    } catch (err: any) {
+    } catch (e) {
+      const err = e as { code?: string };
       console.error(err);
       setLinkError(err.code === 'auth/credential-already-in-use' ? 'Этот номер уже привязан к другому аккаунту.' : 'Неверный СМС код.');
     } finally {
@@ -186,9 +287,10 @@ export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProp
       setLinkingLoading(`unlink-${providerId}`);
       try {
         await unlink(auth.currentUser!, providerId);
-      } catch (e: any) {
-        console.error(e);
-        setLinkError(e.message);
+      } catch (e) {
+        const err = e as { message?: string };
+        console.error(err);
+        setLinkError(err.message || String(e));
       } finally {
         setLinkingLoading(null);
       }
@@ -315,6 +417,51 @@ export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProp
                   )}
                 </div>
               )}
+
+              {/* TELEGRAM */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px solid var(--border-color)', paddingTop: '10px', marginTop: '4px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style={{ color: '#0088cc' }}>
+                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 0 0-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.75-.55 2.92-1.27 4.86-2.11 5.83-2.52 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .24z"/>
+                    </svg>
+                    Telegram
+                  </span>
+                  {tgLinked ? (
+                    <span style={{ fontSize: '12px', color: 'var(--success)', fontWeight: 600 }}>Привязан ({tgId})</span>
+                  ) : (
+                    <button 
+                      onClick={handleGenerateTelegramCode} 
+                      disabled={tgLoading} 
+                      style={{ fontSize: '12px', color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', gap: '4px', background: 'transparent', border: 'none', cursor: 'pointer' }}
+                    >
+                      {tgLoading ? <Loader2 size={12} className="animate-spin" /> : <LinkIcon size={12} />} Привязать
+                    </button>
+                  )}
+                </div>
+                {tgLinkCode && !tgLinked && (
+                  <div style={{ padding: '12px', background: 'var(--bg-tertiary)', borderRadius: '8px', marginTop: '4px', fontSize: '13px' }}>
+                    <p style={{ marginBottom: '8px', lineHeight: 1.4, color: 'var(--text-muted)' }}>
+                      Откройте нашего бота и запустите его (или просто нажмите кнопку ниже):
+                    </p>
+                    <a 
+                      href={`https://t.me/${import.meta.env.VITE_TELEGRAM_BOT_USERNAME || 'FinanceTrackerBot'}?start=${tgLinkCode}`} 
+                      target="_blank" 
+                      rel="noreferrer"
+                      style={{ 
+                        display: 'block', textDecoration: 'none', textAlign: 'center', 
+                        background: 'var(--accent-primary)', color: 'white', padding: '8px', 
+                        borderRadius: '6px', fontWeight: 600, marginBottom: '6px' 
+                      }}
+                    >
+                      Открыть бот
+                    </a>
+                    <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '11px' }}>
+                      Код привязки: <strong style={{ fontSize: '14px', color: 'var(--text-primary)', letterSpacing: '1px' }}>{tgLinkCode}</strong>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -513,6 +660,7 @@ export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProp
                   onChange={(e) => {
                     setSelectedStrategy(e.target.value);
                     localStorage.setItem('gemini_strategy', e.target.value);
+                    saveSettings(e.target.value, aiInstructions);
                   }}
                   style={{
                     width: '100%',
@@ -543,6 +691,9 @@ export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProp
                   onChange={(e) => {
                     setAiInstructions(e.target.value);
                     localStorage.setItem('gemini_instructions', e.target.value);
+                  }}
+                  onBlur={(e) => {
+                    saveSettings(selectedStrategy, e.target.value);
                   }}
                   placeholder="Пример: Обращайся на 'вы', делай упор на долгосрочные цели..."
                   style={{
