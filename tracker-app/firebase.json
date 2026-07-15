@@ -24,7 +24,10 @@
         "node_modules",
         ".git",
         "firebase-debug.log",
-        "firestore-debug.log"
+        "firestore-debug.log",
+        "*.local",
+        ".env.local",
+        ".secret.local"
       ]
     }
   ]
