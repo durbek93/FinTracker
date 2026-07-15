@@ -347,11 +347,27 @@ async function processParsedTransaction(chatId, userMessageId, botMessageId, par
         const startOfMonthIso = new Date(startOfMonthUtcMs).toISOString();
         const txsSnap = await db.collection("transactions")
             .where("userId", "==", userId)
-            .where("date", ">=", startOfMonthIso)
             .get();
-        const transactions = txsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        const expenseTxs = transactions.filter(t => t.type === 'expense');
-        const incomeTxs = transactions.filter(t => t.type === 'income');
+        const allTransactions = txsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        // Calculate current balances using all transactions
+        const calculatedAccounts = (0, balances_1.calculateBalances)(accounts, allTransactions);
+        let totalBalanceUZS = 0;
+        let totalBalanceUSD = 0;
+        calculatedAccounts.forEach((acc) => {
+            const isUSD = acc.currency === "USD";
+            const balance = isUSD ? acc.balanceUSD : acc.balanceUZS;
+            if (!acc.excludeFromTotal) {
+                if (isUSD)
+                    totalBalanceUSD += balance;
+                else
+                    totalBalanceUZS += balance;
+            }
+        });
+        // Filter for current month's transactions locally
+        const currentMonthTxs = allTransactions.filter(t => t.date && t.date >= startOfMonthIso);
+        const expenseTxs = currentMonthTxs.filter(t => (t.type === 'expense' && t.excludeFromStats !== true) ||
+            (t.type === 'transfer' && t.addToExpenses === true && t.excludeFromStats !== true));
+        const incomeTxs = currentMonthTxs.filter(t => t.type === 'income' && t.excludeFromStats !== true);
         const totalIncome = incomeTxs.reduce((acc, t) => acc + (t.currency === 'UZS' ? t.amount : (t.convertedAmount || 0)), 0);
         const totalExpenses = expenseTxs.reduce((acc, t) => acc + (t.currency === 'UZS' ? t.amount : (t.convertedAmount || 0)), 0);
         const incCatTotals = {};
@@ -368,17 +384,34 @@ async function processParsedTransaction(chatId, userMessageId, botMessageId, par
         const expCatTotals = {};
         expenseTxs.forEach(t => {
             const amt = t.currency === 'UZS' ? t.amount : (t.convertedAmount || 0);
-            const catId = t.categoryId || "unknown";
+            let catId = t.categoryId || "unknown";
+            if (t.type === 'transfer') {
+                catId = "transfer_expense";
+            }
             expCatTotals[catId] = (expCatTotals[catId] || 0) + amt;
         });
-        const expensesByCategory = Object.entries(expCatTotals).map(([id, amt]) => ({
-            category: categories.find(c => c.id === id)?.name || 'Неизвестно',
-            amount: amt,
-            percentage: totalExpenses > 0 ? Number(((amt / totalExpenses) * 100).toFixed(1)) : 0
-        })).sort((a, b) => b.amount - a.amount);
+        const expensesByCategory = Object.entries(expCatTotals).map(([id, amt]) => {
+            let categoryName = 'Неизвестно';
+            if (id === 'transfer_expense') {
+                categoryName = 'Обмен валюты / Переводы';
+            }
+            else {
+                categoryName = categories.find(c => c.id === id)?.name || 'Неизвестно';
+            }
+            return {
+                category: categoryName,
+                amount: amt,
+                percentage: totalExpenses > 0 ? Number(((amt / totalExpenses) * 100).toFixed(1)) : 0
+            };
+        }).sort((a, b) => b.amount - a.amount);
         const stats = {
             totalExpenses,
             totalIncome,
+            netSavings: totalIncome - totalExpenses,
+            currentBalance: {
+                totalUZS: totalBalanceUZS,
+                totalUSD: totalBalanceUSD
+            },
             expensesByCategory,
             incomesByCategory
         };
@@ -389,11 +422,27 @@ async function processParsedTransaction(chatId, userMessageId, botMessageId, par
             if (usageMetadata) {
                 console.log(`[Gemini Bot Advice] Tokens: prompt=${usageMetadata.promptTokenCount}, candidates=${usageMetadata.candidatesTokenCount}, total=${usageMetadata.totalTokenCount}`);
             }
+            const chunks = splitMessage(adviceText, 3000);
+            let editSuccess = false;
             if (statusMsgId) {
-                await (0, telegram_1.editMessageText)(botToken, chatId, statusMsgId, adviceText);
+                editSuccess = await (0, telegram_1.editMessageText)(botToken, chatId, statusMsgId, chunks[0]);
+                if (editSuccess) {
+                    for (let i = 1; i < chunks.length; i++) {
+                        await (0, telegram_1.sendTelegramMessage)(botToken, chatId, chunks[i]);
+                    }
+                }
+                else {
+                    // If editing failed, delete the status message and send everything fresh
+                    await (0, telegram_1.deleteTelegramMessage)(botToken, chatId, statusMsgId).catch(() => { });
+                    for (const chunk of chunks) {
+                        await (0, telegram_1.sendTelegramMessage)(botToken, chatId, chunk);
+                    }
+                }
             }
             else {
-                await (0, telegram_1.sendTelegramMessage)(botToken, chatId, adviceText);
+                for (const chunk of chunks) {
+                    await (0, telegram_1.sendTelegramMessage)(botToken, chatId, chunk);
+                }
             }
             // Generate and send voice message of the advice (also)
             try {
@@ -401,7 +450,9 @@ async function processParsedTransaction(chatId, userMessageId, botMessageId, par
                 if (cleanText) {
                     const accessToken = await (0, tts_1.getGoogleAccessToken)();
                     if (accessToken) {
-                        const voiceBuffer = await (0, tts_1.synthesizeSpeech)(cleanText, accessToken);
+                        // Slicing to 1500 characters (max ~3000 bytes) to stay safely below TTS 5000-byte API limit
+                        const ttsText = cleanText.length > 1500 ? cleanText.slice(0, 1500) + "..." : cleanText;
+                        const voiceBuffer = await (0, tts_1.synthesizeSpeech)(ttsText, accessToken);
                         if (voiceBuffer) {
                             await (0, telegram_1.sendTelegramVoice)(botToken, chatId, voiceBuffer);
                         }
@@ -414,10 +465,11 @@ async function processParsedTransaction(chatId, userMessageId, botMessageId, par
         }
         else {
             const errorMsg = "❌ Не удалось получить финансовые рекомендации от ИИ. Попробуйте еще раз позже.";
+            let editSuccess = false;
             if (statusMsgId) {
-                await (0, telegram_1.editMessageText)(botToken, chatId, statusMsgId, errorMsg);
+                editSuccess = await (0, telegram_1.editMessageText)(botToken, chatId, statusMsgId, errorMsg);
             }
-            else {
+            if (!editSuccess) {
                 await (0, telegram_1.sendTelegramMessage)(botToken, chatId, errorMsg);
             }
         }
@@ -686,4 +738,39 @@ exports.authTelegram = (0, https_1.onCall)({ secrets: [TELEGRAM_BOT_TOKEN] }, as
         throw new https_1.HttpsError("internal", error.message || "Failed to authenticate.");
     }
 });
+/**
+ * Splits a text into chunks of at most maxLength characters, splitting at line boundaries if possible.
+ */
+function splitMessage(text, maxLength = 4000) {
+    const chunks = [];
+    let currentChunk = "";
+    const lines = text.split("\n");
+    for (const line of lines) {
+        if (line.length > maxLength) {
+            if (currentChunk.trim()) {
+                chunks.push(currentChunk.trim());
+                currentChunk = "";
+            }
+            let remaining = line;
+            while (remaining.length > maxLength) {
+                chunks.push(remaining.substring(0, maxLength));
+                remaining = remaining.substring(maxLength);
+            }
+            currentChunk = remaining + "\n";
+        }
+        else if ((currentChunk + line).length > maxLength) {
+            if (currentChunk.trim()) {
+                chunks.push(currentChunk.trim());
+            }
+            currentChunk = line + "\n";
+        }
+        else {
+            currentChunk += line + "\n";
+        }
+    }
+    if (currentChunk.trim()) {
+        chunks.push(currentChunk.trim());
+    }
+    return chunks;
+}
 //# sourceMappingURL=index.js.map

@@ -16,6 +16,9 @@ export interface DBTransaction {
   convertedAmount?: number;
   type: "income" | "expense" | "transfer";
   categoryId?: string;
+  excludeFromStats?: boolean;
+  addToExpenses?: boolean;
+  date: string;
 }
 
 export function calculateBalances(accounts: DBAccount[], transactions: DBTransaction[]): DBAccount[] {

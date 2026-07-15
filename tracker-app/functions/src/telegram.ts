@@ -52,7 +52,7 @@ export async function editMessageText(
   messageId: number,
   text: string,
   replyMarkup?: Record<string, unknown>
-): Promise<void> {
+): Promise<boolean> {
   const url = `https://api.telegram.org/bot${botToken}/editMessageText`;
   try {
     await axios.post(url, {
@@ -62,9 +62,11 @@ export async function editMessageText(
       reply_markup: replyMarkup,
       parse_mode: "HTML",
     });
+    return true;
   } catch (e: unknown) {
     const error = e as { response?: { data?: unknown }; message?: string };
     console.error("Error editing Telegram message:", error.response?.data || error.message);
+    return false;
   }
 }
 

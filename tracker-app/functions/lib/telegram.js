@@ -96,10 +96,12 @@ async function editMessageText(botToken, chatId, messageId, text, replyMarkup) {
             reply_markup: replyMarkup,
             parse_mode: "HTML",
         });
+        return true;
     }
     catch (e) {
         const error = e;
         console.error("Error editing Telegram message:", error.response?.data || error.message);
+        return false;
     }
 }
 /**
