@@ -489,7 +489,12 @@ async function processParsedTransaction(
   }
 
   if (parsedJson.intent === "get_advice") {
-    const adviceMsg = "🤖 <i>Анализирую ваши траты за текущий месяц...</i>";
+    let adviceMsg = "🤖 <i>Анализирую ваши траты за текущий месяц...</i>";
+    if (parsedJson.adviceStartDate) {
+      const startStr = parsedJson.adviceStartDate.split("-").reverse().join(".");
+      const endStr = (parsedJson.adviceEndDate || "").split("-").reverse().join(".");
+      adviceMsg = `🤖 <i>Анализирую ваши траты за период c ${startStr} по ${endStr || 'сегодня'}...</i>`;
+    }
     let statusMsgId = botMessageId;
     if (statusMsgId) {
       await editMessageText(botToken, chatId, statusMsgId, adviceMsg);
@@ -532,8 +537,32 @@ async function processParsedTransaction(
       }
     });
 
-    // Filter for current month's transactions locally
-    const currentMonthTxs = allTransactions.filter(t => t.date && t.date >= startOfMonthIso);
+    // Parse date ranges
+    let startDateIso = startOfMonthIso;
+    let endDateIso = new Date(nowUtcMs).toISOString();
+
+    if (parsedJson.adviceStartDate) {
+      try {
+        const [y, m, d] = parsedJson.adviceStartDate.split("-").map(Number);
+        const localStartMs = Date.UTC(y, m - 1, d, 0, 0, 0);
+        startDateIso = new Date(localStartMs + (timezoneOffset * 60 * 1000)).toISOString();
+      } catch (e) {
+        console.error("Error parsing adviceStartDate:", e);
+      }
+    }
+
+    if (parsedJson.adviceEndDate) {
+      try {
+        const [y, m, d] = parsedJson.adviceEndDate.split("-").map(Number);
+        const localEndMs = Date.UTC(y, m - 1, d, 23, 59, 59, 999);
+        endDateIso = new Date(localEndMs + (timezoneOffset * 60 * 1000)).toISOString();
+      } catch (e) {
+        console.error("Error parsing adviceEndDate:", e);
+      }
+    }
+
+    // Filter transactions locally
+    const currentMonthTxs = allTransactions.filter(t => t.date && t.date >= startDateIso && t.date <= endDateIso);
 
     const expenseTxs = currentMonthTxs.filter(t => 
       (t.type === 'expense' && t.excludeFromStats !== true) ||
