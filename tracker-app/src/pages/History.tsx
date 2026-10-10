@@ -46,6 +46,7 @@ export default function History() {
   const poolParam = queryParams.get('pool');
   const hasFilterParams = Boolean(typeParam || currencyParam || addToExpensesParam || localCategory || poolParam);
 
+  const [selectedType, setSelectedType] = useState<string>(typeParam || 'all');
   const [startDate, setStartDate] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
   const [endDate, setEndDate] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
   const [searchTerm, setSearchTerm] = useState('');
@@ -63,6 +64,14 @@ export default function History() {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  // Update selectedType if URL parameter changes
+  useEffect(() => {
+    if (typeParam) setSelectedType(typeParam);
+  }, [typeParam]);
+
+  const expenseCategories = categories.filter(c => c.type === 'expense');
+  const incomeCategories = categories.filter(c => c.type === 'income');
+
   const filteredTransactions = transactions.filter(t => {
     const tDate = new Date(t.date);
     
@@ -75,6 +84,11 @@ export default function History() {
       if (isValid(eDate) && tDate > endOfDay(eDate)) return false;
     }
     
+    // Type filtering (from tabs)
+    if (selectedType !== 'all') {
+      if (t.type !== selectedType) return false;
+    }
+
     if (localCategory && t.categoryId !== localCategory) return false;
 
     if (searchTerm) {
@@ -112,6 +126,17 @@ export default function History() {
     if (fmt === 'csv') exportToCSV(filteredTransactions, categories, accounts, filenameBase);
     if (fmt === 'xlsx') exportToXLSX(filteredTransactions, categories, accounts, filenameBase);
     if (fmt === 'pdf') exportToPDF(filteredTransactions, categories, accounts, dateRangeLabel, filenameBase);
+  };
+
+  const handleTypeChange = (type: string) => {
+    setSelectedType(type);
+    // If the currently selected category doesn't belong to the new type, reset it
+    if (localCategory) {
+      const cat = categories.find(c => c.id === localCategory);
+      if (cat && type !== 'all' && cat.type !== type) {
+        setLocalCategory('');
+      }
+    }
   };
 
   return (
@@ -163,6 +188,71 @@ export default function History() {
         </div>
       </div>
 
+      {/* Type Selector Tabs: Все | Расход | Приход | Переводы */}
+      <div style={{ display: 'flex', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)', padding: '4px', marginBottom: '14px', gap: '2px' }}>
+        <button
+          type="button"
+          onClick={() => handleTypeChange('all')}
+          style={{
+            flex: 1, padding: '9px 2px', borderRadius: 'var(--radius-sm)',
+            background: selectedType === 'all' ? 'var(--bg-secondary)' : 'transparent',
+            color: selectedType === 'all' ? 'var(--text-primary)' : 'var(--text-muted)',
+            fontWeight: selectedType === 'all' ? 600 : 400,
+            fontSize: '13px', border: 'none', cursor: 'pointer',
+            boxShadow: selectedType === 'all' ? 'var(--shadow-sm)' : 'none',
+            transition: 'all 0.2s'
+          }}
+        >
+          Все
+        </button>
+        <button
+          type="button"
+          onClick={() => handleTypeChange('expense')}
+          style={{
+            flex: 1, padding: '9px 2px', borderRadius: 'var(--radius-sm)',
+            background: selectedType === 'expense' ? 'var(--bg-secondary)' : 'transparent',
+            color: selectedType === 'expense' ? 'var(--danger)' : 'var(--text-muted)',
+            fontWeight: selectedType === 'expense' ? 600 : 400,
+            fontSize: '13px', border: 'none', cursor: 'pointer',
+            boxShadow: selectedType === 'expense' ? 'var(--shadow-sm)' : 'none',
+            transition: 'all 0.2s'
+          }}
+        >
+          Расходы
+        </button>
+        <button
+          type="button"
+          onClick={() => handleTypeChange('income')}
+          style={{
+            flex: 1, padding: '9px 2px', borderRadius: 'var(--radius-sm)',
+            background: selectedType === 'income' ? 'var(--bg-secondary)' : 'transparent',
+            color: selectedType === 'income' ? 'var(--success)' : 'var(--text-muted)',
+            fontWeight: selectedType === 'income' ? 600 : 400,
+            fontSize: '13px', border: 'none', cursor: 'pointer',
+            boxShadow: selectedType === 'income' ? 'var(--shadow-sm)' : 'none',
+            transition: 'all 0.2s'
+          }}
+        >
+          Доходы
+        </button>
+        <button
+          type="button"
+          onClick={() => handleTypeChange('transfer')}
+          style={{
+            flex: 1, padding: '9px 2px', borderRadius: 'var(--radius-sm)',
+            background: selectedType === 'transfer' ? 'var(--bg-secondary)' : 'transparent',
+            color: selectedType === 'transfer' ? 'var(--accent-primary)' : 'var(--text-muted)',
+            fontWeight: selectedType === 'transfer' ? 600 : 400,
+            fontSize: '13px', border: 'none', cursor: 'pointer',
+            boxShadow: selectedType === 'transfer' ? 'var(--shadow-sm)' : 'none',
+            transition: 'all 0.2s'
+          }}
+        >
+          Переводы
+        </button>
+      </div>
+
+      {/* Filter panel */}
       <div className="glass-panel" style={{ padding: '16px', marginBottom: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <div style={{ display: 'flex', gap: '8px' }}>
@@ -174,17 +264,38 @@ export default function History() {
               onChange={e => setSearchTerm(e.target.value)}
               style={{ flex: 1, marginBottom: '4px', width: '100%' }}
             />
-            <select
-              value={localCategory}
-              onChange={e => setLocalCategory(e.target.value)}
-              className="date-time-input"
-              style={{ flex: 1, marginBottom: '4px', width: '100%', boxSizing: 'border-box' }}
-            >
-              <option value="">Все категории</option>
-              {categories.map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
+            {selectedType !== 'transfer' && (
+              <select
+                value={localCategory}
+                onChange={e => setLocalCategory(e.target.value)}
+                className="date-time-input"
+                style={{ flex: 1, marginBottom: '4px', width: '100%', boxSizing: 'border-box' }}
+              >
+                <option value="">Все категории</option>
+                {selectedType === 'expense' ? (
+                  expenseCategories.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))
+                ) : selectedType === 'income' ? (
+                  incomeCategories.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))
+                ) : (
+                  <>
+                    <optgroup label="🔴 Расходы">
+                      {expenseCategories.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="🟢 Доходы">
+                      {incomeCategories.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </optgroup>
+                  </>
+                )}
+              </select>
+            )}
           </div>
           <div style={{ display: 'flex', gap: '12px' }}>
             <div style={{ flex: 1 }}>
@@ -207,7 +318,7 @@ export default function History() {
             </div>
           </div>
         </div>
-        {(startDate || endDate || localCategory) && (
+        {(startDate || endDate || localCategory || selectedType !== 'all') && (
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             {localCategory ? (
               <div style={{ fontSize: '13px', color: 'var(--text-secondary)', background: 'var(--bg-secondary)', padding: '4px 8px', borderRadius: '4px' }}>
@@ -215,7 +326,14 @@ export default function History() {
               </div>
             ) : <div />}
             <button
-              onClick={() => { setStartDate(''); setEndDate(''); setSearchTerm(''); setLocalCategory(''); navigate('/history'); }}
+              onClick={() => { 
+                setStartDate(''); 
+                setEndDate(''); 
+                setSearchTerm(''); 
+                setLocalCategory(''); 
+                setSelectedType('all');
+                navigate('/history'); 
+              }}
               style={{ color: 'var(--accent-primary)', fontSize: '14px', fontWeight: 500 }}
             >
               Сбросить фильтр
@@ -232,20 +350,31 @@ export default function History() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           {grouped.map((group, groupIdx) => {
             const dateLabel = format(group.date, 'd MMMM, yyyy', { locale: ru });
-            // Calculate daily total
+            // Calculate daily totals for UZS
             const dailyTotalExpenseUZS = group.transactions
               .filter(t => t.type === 'expense' && t.currency === 'UZS')
               .reduce((acc, t) => acc + t.amount, 0);
 
+            const dailyTotalIncomeUZS = group.transactions
+              .filter(t => t.type === 'income' && t.currency === 'UZS')
+              .reduce((acc, t) => acc + t.amount, 0);
+
             return (
               <div key={groupIdx}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', padding: '0 4px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', padding: '0 4px' }}>
                   <span className="text-muted" style={{ fontSize: '14px', fontWeight: 500 }}>{dateLabel}</span>
-                  {dailyTotalExpenseUZS > 0 && (
-                    <span className="text-muted" style={{ fontSize: '14px' }}>
-                      -{formatCurrency(dailyTotalExpenseUZS, 'UZS')}
-                    </span>
-                  )}
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                    {dailyTotalIncomeUZS > 0 && (
+                      <span style={{ fontSize: '13px', color: 'var(--success)', fontWeight: 600 }}>
+                        +{formatCurrency(dailyTotalIncomeUZS, 'UZS')}
+                      </span>
+                    )}
+                    {dailyTotalExpenseUZS > 0 && (
+                      <span style={{ fontSize: '13px', color: 'var(--danger)', fontWeight: 600 }}>
+                        -{formatCurrency(dailyTotalExpenseUZS, 'UZS')}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div className="glass-panel" style={{ padding: '8px 16px' }}>

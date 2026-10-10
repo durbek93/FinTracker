@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useStore } from '../store';
 import { getIcon } from '../lib/icons';
@@ -14,6 +15,7 @@ export default function AccountDetails() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { accounts, transactions, categories, deleteAccount } = useStore();
+  const [activeTab, setActiveTab] = useState<'all' | 'expense' | 'income'>('all');
   
   const account = accounts.find(a => a.id === id);
   
@@ -23,10 +25,29 @@ export default function AccountDetails() {
   
   const accountTransactions = transactions.filter(t => t.accountId === id || t.toAccountId === id);
   
-  // Apply sorting implicitly assuming store returns sorted transactions (which it does via Firestore 'desc')
-  
   const currency = account.currency || 'UZS';
   const balance = currency === 'UZS' ? account.balanceUZS : account.balanceUSD;
+
+  // Calculate totals for this account
+  const totalIncomeForCard = accountTransactions
+    .filter(t => (t.type === 'transfer' ? t.toAccountId === account.id : t.type === 'income'))
+    .reduce((acc, t) => {
+      const amt = (t.type === 'transfer' && t.toAccountId === account.id && t.convertedAmount) ? t.convertedAmount : t.amount;
+      return acc + amt;
+    }, 0);
+
+  const totalExpenseForCard = accountTransactions
+    .filter(t => (t.type === 'transfer' ? t.accountId === account.id : t.type === 'expense'))
+    .reduce((acc, t) => acc + t.amount, 0);
+
+  // Filter transactions based on active tab
+  const displayedTransactions = accountTransactions.filter(t => {
+    if (activeTab === 'all') return true;
+    const isIncome = t.type === 'transfer' ? t.toAccountId === account.id : t.type === 'income';
+    if (activeTab === 'income') return isIncome;
+    if (activeTab === 'expense') return !isIncome;
+    return true;
+  });
 
   return (
     <div className="page-content animate-fade-in">
@@ -58,12 +79,81 @@ export default function AccountDetails() {
         </h2>
       </div>
 
-      <h3 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '12px' }}>Транзакции</h3>
+      {/* Summary strip: Расход / Приход */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '16px' }}>
+        <div className="glass-panel" style={{ padding: '12px 14px', borderLeft: '3px solid var(--danger)' }}>
+          <p className="text-muted" style={{ fontSize: '12px', marginBottom: '2px' }}>Всего расход</p>
+          <p style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
+            -{formatCurrency(totalExpenseForCard, currency)}
+          </p>
+        </div>
+        <div className="glass-panel" style={{ padding: '12px 14px', borderLeft: '3px solid var(--success)' }}>
+          <p className="text-muted" style={{ fontSize: '12px', marginBottom: '2px' }}>Всего приход</p>
+          <p style={{ fontSize: '15px', fontWeight: 600, color: 'var(--success)', margin: 0 }}>
+            +{formatCurrency(totalIncomeForCard, currency)}
+          </p>
+        </div>
+      </div>
+
+      {/* Tabs: Все | Расход | Приход */}
+      <div style={{ display: 'flex', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)', padding: '4px', marginBottom: '16px' }}>
+        <button
+          type="button"
+          onClick={() => setActiveTab('all')}
+          style={{
+            flex: 1, padding: '10px 4px', borderRadius: 'var(--radius-sm)',
+            background: activeTab === 'all' ? 'var(--bg-secondary)' : 'transparent',
+            color: activeTab === 'all' ? 'var(--text-primary)' : 'var(--text-muted)',
+            fontWeight: activeTab === 'all' ? 600 : 400,
+            fontSize: '14px',
+            border: 'none', cursor: 'pointer',
+            boxShadow: activeTab === 'all' ? 'var(--shadow-sm)' : 'none',
+            transition: 'all 0.2s'
+          }}
+        >
+          Все ({accountTransactions.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('expense')}
+          style={{
+            flex: 1, padding: '10px 4px', borderRadius: 'var(--radius-sm)',
+            background: activeTab === 'expense' ? 'var(--bg-secondary)' : 'transparent',
+            color: activeTab === 'expense' ? 'var(--danger)' : 'var(--text-muted)',
+            fontWeight: activeTab === 'expense' ? 600 : 400,
+            fontSize: '14px',
+            border: 'none', cursor: 'pointer',
+            boxShadow: activeTab === 'expense' ? 'var(--shadow-sm)' : 'none',
+            transition: 'all 0.2s'
+          }}
+        >
+          Расход
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('income')}
+          style={{
+            flex: 1, padding: '10px 4px', borderRadius: 'var(--radius-sm)',
+            background: activeTab === 'income' ? 'var(--bg-secondary)' : 'transparent',
+            color: activeTab === 'income' ? 'var(--success)' : 'var(--text-muted)',
+            fontWeight: activeTab === 'income' ? 600 : 400,
+            fontSize: '14px',
+            border: 'none', cursor: 'pointer',
+            boxShadow: activeTab === 'income' ? 'var(--shadow-sm)' : 'none',
+            transition: 'all 0.2s'
+          }}
+        >
+          Приход
+        </button>
+      </div>
+
       <div className="glass-panel" style={{ padding: '8px 16px' }}>
-        {accountTransactions.length === 0 ? (
-          <p className="text-muted" style={{ padding: '16px 0', textAlign: 'center' }}>Нет операций</p>
+        {displayedTransactions.length === 0 ? (
+          <p className="text-muted" style={{ padding: '16px 0', textAlign: 'center' }}>
+            {activeTab === 'all' ? 'Нет операций' : activeTab === 'expense' ? 'Нет расходов' : 'Нет приходов'}
+          </p>
         ) : (
-          accountTransactions.map((t, idx) => {
+          displayedTransactions.map((t, idx) => {
             const category = categories.find(c => c.id === t.categoryId);
             const isTransfer = t.type === 'transfer';
             const isIncomeForThisCard = isTransfer ? t.toAccountId === account.id : t.type === 'income';
@@ -78,7 +168,7 @@ export default function AccountDetails() {
             return (
               <Link key={t.id} to={`/edit/${t.id}`} style={{ 
                 display: 'flex', alignItems: 'center', padding: '12px 0', 
-                borderBottom: idx < accountTransactions.length - 1 ? '1px solid var(--border-color)' : 'none',
+                borderBottom: idx < displayedTransactions.length - 1 ? '1px solid var(--border-color)' : 'none',
                 textDecoration: 'none', color: 'inherit'
               }}>
                 <div style={{

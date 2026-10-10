@@ -4,8 +4,9 @@ import { useStore } from '../store';
 import { getIcon } from '../lib/icons';
 import { format } from 'date-fns';
 import { TransactionType, Currency, Transaction } from '../types';
-import { ArrowRightLeft, ArrowLeft, Sparkles, Loader2 } from 'lucide-react';
+import { ArrowRightLeft, ArrowLeft, Sparkles, Loader2, Calculator } from 'lucide-react';
 import { parseTransactionText, hasGeminiKey } from '../lib/gemini';
+import CalculatorModal from '../components/CalculatorModal';
 
 export default function AddTransaction() {
   const { addTransaction, updateTransaction, deleteTransaction, accounts, transactions, categories } = useStore();
@@ -27,6 +28,7 @@ export default function AddTransaction() {
   const [note, setNote] = useState('');
   const [addToExpenses, setAddToExpenses] = useState(false);
   const [excludeFromStats, setExcludeFromStats] = useState(false);
+  const [isCalcOpen, setIsCalcOpen] = useState(false);
 
   // Smart Input state
   const [aiText, setAiText] = useState('');
@@ -432,7 +434,31 @@ export default function AddTransaction() {
 
         {/* Amount & Currency */}
         <div>
-          <label className="text-muted" style={{ display: 'block', fontSize: '14px', marginBottom: '8px' }}>Сумма</label>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <label className="text-muted" style={{ fontSize: '14px', margin: 0 }}>Сумма</label>
+            <button
+              type="button"
+              onClick={() => setIsCalcOpen(true)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontSize: '13px',
+                color: 'var(--accent-primary)',
+                background: 'rgba(99, 102, 241, 0.1)',
+                border: '1px solid rgba(99, 102, 241, 0.25)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '4px 10px',
+                cursor: 'pointer',
+                fontWeight: 500,
+                transition: 'all 0.2s ease'
+              }}
+              title="Открыть калькулятор"
+            >
+              <Calculator size={14} />
+              <span>Калькулятор</span>
+            </button>
+          </div>
           <div style={{ 
             display: 'flex', 
             background: 'var(--bg-secondary)', 
@@ -719,6 +745,13 @@ export default function AddTransaction() {
           </button>
         )}
       </form>
+
+      <CalculatorModal
+        isOpen={isCalcOpen}
+        onClose={() => setIsCalcOpen(false)}
+        onApply={val => setAmount(val)}
+        initialValue={amount}
+      />
     </div>
   );
 }

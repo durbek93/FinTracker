@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import { getIcon } from '../lib/icons';
-import { PieChart, BarChart2, TrendingDown, Calendar, Brain, Sparkles, Loader2, ChevronDown, ChevronUp, Download } from 'lucide-react';
+import { PieChart, BarChart2, TrendingDown, TrendingUp, Calendar, Brain, Sparkles, Loader2, ChevronDown, ChevronUp, Download, Wallet } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, startOfDay, endOfDay, isValid } from 'date-fns';
 import { getFinancialAdvice, AnalystReport, hasGeminiKey } from '../lib/gemini';
 import { useFinancialStrategy } from '../hooks/useFinancialStrategy';
@@ -63,7 +63,7 @@ function DonutChart({ slices }: { slices: DonutSlice[] }) {
 
 // ── Main Component ─────────────────────────────────────────────────────────
 export default function Analytics() {
-  const { transactions: storeTransactions, categories } = useStore();
+  const { transactions: storeTransactions, categories, accounts } = useStore();
   const navigate = useNavigate();
 
   const { strategyId, currentStrategy: strategy, personalInstructions } = useFinancialStrategy();
@@ -120,11 +120,11 @@ export default function Analytics() {
     .filter(t => t.currency === 'UZS')
     .reduce((acc, t) => acc + t.amount, 0);
 
-  // USD expenses converted to UZS (Вариант А: manual exchange rate)
+  // USD expenses converted to UZS
   const usdExpensesInUZS = expenseTxs
     .filter(t => t.currency === 'USD')
     .reduce((acc, t) => {
-      return acc + (t.convertedAmount ?? 0);
+      return acc + (t.convertedAmount ?? (t.exchangeRate ? t.amount * t.exchangeRate : 0));
     }, 0);
 
   // Transfers from USD to UZS cards (taking cash out of USD pool)
@@ -144,22 +144,63 @@ export default function Analytics() {
 
   // Remaining pool = purchased - already spent from USD (including transfers back to UZS)
   const usdPoolRemaining = Math.max(0, usdPurchasePoolTotal - totalUsdSpentInUZS);
-
   const hasUsdPool = usdPurchasePoolTotal > 0;
 
-  // Grand total
+  // Grand total expenses
   const grandTotal = totalUZSExpenses + usdPoolRemaining;
+
+  // ── Income calculations ──────────────────────────────────────────────────
+  const incomeTxs = transactions.filter(t => t.type === 'income');
+
+  const regularUZSIncome = incomeTxs
+    .filter(t => t.currency === 'UZS')
+    .reduce((acc, t) => acc + t.amount, 0);
+
+  const usdIncomeInUZS = incomeTxs
+    .filter(t => t.currency === 'USD')
+    .reduce((acc, t) => acc + (t.convertedAmount ?? (t.exchangeRate ? t.amount * t.exchangeRate : 0)), 0);
+
+  const totalUSDIncome = incomeTxs
+    .filter(t => t.currency === 'USD')
+    .reduce((acc, t) => acc + t.amount, 0);
+
+  const totalIncomeUZS = regularUZSIncome + usdIncomeInUZS;
+
+  // Net Balance (Сальдо / Дельта за период)
+  const netBalance = totalIncomeUZS - grandTotal;
+
+  // Group incomes by account
+  const accountIncomeMap: Record<string, { uzs: number; usd: number }> = {};
+  incomeTxs.forEach(t => {
+    const accId = t.accountId;
+    if (!accountIncomeMap[accId]) accountIncomeMap[accId] = { uzs: 0, usd: 0 };
+    if (t.currency === 'USD') {
+      accountIncomeMap[accId].usd += t.amount;
+    } else {
+      accountIncomeMap[accId].uzs += t.amount;
+    }
+  });
+
+  const incomeByAccounts = Object.entries(accountIncomeMap).map(([accId, totals]) => {
+    const acc = accounts.find(a => a.id === accId);
+    return {
+      id: accId,
+      name: acc?.name || 'Счет',
+      currency: acc?.currency || 'UZS',
+      totalUZS: totals.uzs,
+      totalUSD: totals.usd
+    };
+  }).filter(a => a.totalUZS > 0 || a.totalUSD > 0);
 
   // ── Category analytics ────────────────────────────────────────────────────
   const filteredTx = transactions.filter(t => t.type === type);
-  const totalAmount = filteredTx.reduce((acc, t) => {
-    const amountInUZS = t.currency === 'UZS' ? t.amount : (t.convertedAmount || 0);
-    return acc + amountInUZS;
-  }, 0);
+  const totalAmount = type === 'expense' ? grandTotal : totalIncomeUZS;
 
   const categoryTotals: Record<string, number> = {};
   filteredTx.forEach(t => {
-    const amountInUZS = t.currency === 'UZS' ? t.amount : (t.convertedAmount || 0);
+    const amountInUZS = t.currency === 'UZS' 
+      ? t.amount 
+      : (t.convertedAmount ?? (t.exchangeRate ? t.amount * t.exchangeRate : 0));
     categoryTotals[t.categoryId] = (categoryTotals[t.categoryId] || 0) + amountInUZS;
   });
 
@@ -172,7 +213,7 @@ export default function Analytics() {
     .sort((a, b) => b.amount - a.amount);
 
   const donutSlices: DonutSlice[] = sortedCategories.map(item => ({
-    color: item.category?.color || 'var(--accent-primary)',
+    color: item.category?.color || (type === 'income' ? 'var(--success)' : 'var(--accent-primary)'),
     percentage: item.percentage,
     label: item.category?.name || 'Неизвестно',
   }));
@@ -184,21 +225,15 @@ export default function Analytics() {
     setIsAiExpanded(true);
     
     try {
-      const expenseTxs = transactions.filter(t => t.type === 'expense');
-      const incomeTxs = transactions.filter(t => t.type === 'income');
-
-      // Aggregate incomes
-      const totalIncome = incomeTxs.reduce((acc, t) => acc + (t.currency === 'UZS' ? t.amount : (t.convertedAmount || 0)), 0);
-      
       const incCatTotals: Record<string, number> = {};
       incomeTxs.forEach(t => {
-        const amt = t.currency === 'UZS' ? t.amount : (t.convertedAmount || 0);
+        const amt = t.currency === 'UZS' ? t.amount : (t.convertedAmount || (t.exchangeRate ? t.amount * t.exchangeRate : 0));
         incCatTotals[t.categoryId] = (incCatTotals[t.categoryId] || 0) + amt;
       });
       const incomesByCategory = Object.entries(incCatTotals).map(([id, amt]) => ({
         category: categories.find(c => c.id === id)?.name || 'Неизвестно',
         amount: amt,
-        percentage: totalIncome > 0 ? Number(((amt / totalIncome) * 100).toFixed(1)) : 0
+        percentage: totalIncomeUZS > 0 ? Number(((amt / totalIncomeUZS) * 100).toFixed(1)) : 0
       })).sort((a,b) => b.amount - a.amount);
 
       // Aggregate expenses
@@ -215,9 +250,9 @@ export default function Analytics() {
       })).sort((a,b) => b.amount - a.amount);
 
       const statsData = {
-        totalExpenses: grandTotal, // Общие расходы (включая пул)
-        categorizedExpensesTotal: totalCategorizedExpenses, // Сумма трат по категориям
-        totalIncome: totalIncome,
+        totalExpenses: grandTotal,
+        categorizedExpensesTotal: totalCategorizedExpenses,
+        totalIncome: totalIncomeUZS,
         expensesByCategory,
         incomesByCategory,
         usdPoolRemaining
@@ -282,14 +317,45 @@ ${aiReport.advice.map(a => '• ' + a).join('\n')}
         </div>
       </div>
 
+      {/* ── Summary Card: Приход, Расход, Сальдо ── */}
+      <div className="glass-panel" style={{ padding: '16px 12px', marginBottom: '14px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', textAlign: 'center' }}>
+        <div style={{ padding: '4px' }}>
+          <p className="text-muted" style={{ fontSize: '11px', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Приход</p>
+          <p style={{ fontSize: '14px', fontWeight: 700, color: 'var(--success)', margin: 0, wordBreak: 'break-word' }}>
+            +{formatCurrency(totalIncomeUZS, '')}
+          </p>
+          <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>UZS</span>
+        </div>
+        <div style={{ padding: '4px', borderLeft: '1px solid var(--border-color)', borderRight: '1px solid var(--border-color)' }}>
+          <p className="text-muted" style={{ fontSize: '11px', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Расход</p>
+          <p style={{ fontSize: '14px', fontWeight: 700, color: 'var(--danger)', margin: 0, wordBreak: 'break-word' }}>
+            -{formatCurrency(grandTotal, '')}
+          </p>
+          <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>UZS</span>
+        </div>
+        <div style={{ padding: '4px' }}>
+          <p className="text-muted" style={{ fontSize: '11px', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Сальдо</p>
+          <p style={{ 
+            fontSize: '14px', 
+            fontWeight: 700, 
+            color: netBalance >= 0 ? 'var(--success)' : 'var(--danger)', 
+            margin: 0,
+            wordBreak: 'break-word'
+          }}>
+            {netBalance >= 0 ? '+' : ''}{formatCurrency(netBalance, '')}
+          </p>
+          <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>UZS</span>
+        </div>
+      </div>
+
       {/* Expense / Income toggle */}
       <div style={{ display: 'flex', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)', padding: '4px', marginBottom: '16px' }}>
         <button onClick={() => setType('expense')}
-          style={{ flex: 1, padding: '10px', borderRadius: 'var(--radius-sm)', background: type === 'expense' ? 'var(--bg-secondary)' : 'transparent', color: type === 'expense' ? 'var(--text-primary)' : 'var(--text-muted)', fontWeight: type === 'expense' ? 600 : 400, boxShadow: type === 'expense' ? 'var(--shadow-sm)' : 'none' }}>
+          style={{ flex: 1, padding: '10px', borderRadius: 'var(--radius-sm)', background: type === 'expense' ? 'var(--bg-secondary)' : 'transparent', color: type === 'expense' ? 'var(--text-primary)' : 'var(--text-muted)', fontWeight: type === 'expense' ? 600 : 400, boxShadow: type === 'expense' ? 'var(--shadow-sm)' : 'none', border: 'none', cursor: 'pointer' }}>
           Расходы
         </button>
         <button onClick={() => setType('income')}
-          style={{ flex: 1, padding: '10px', borderRadius: 'var(--radius-sm)', background: type === 'income' ? 'var(--bg-secondary)' : 'transparent', color: type === 'income' ? 'var(--success)' : 'var(--text-muted)', fontWeight: type === 'income' ? 600 : 400, boxShadow: type === 'income' ? 'var(--shadow-sm)' : 'none' }}>
+          style={{ flex: 1, padding: '10px', borderRadius: 'var(--radius-sm)', background: type === 'income' ? 'var(--bg-secondary)' : 'transparent', color: type === 'income' ? 'var(--success)' : 'var(--text-muted)', fontWeight: type === 'income' ? 600 : 400, boxShadow: type === 'income' ? 'var(--shadow-sm)' : 'none', border: 'none', cursor: 'pointer' }}>
           Доходы
         </button>
       </div>
@@ -363,7 +429,7 @@ ${aiReport.advice.map(a => '• ' + a).join('\n')}
         )}
       </div>
 
-      {/* ── Expense summary cards (only when "Расходы" tab active) ── */}
+      {/* ── Summary cards depending on tab ── */}
       {type === 'expense' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
 
@@ -464,16 +530,55 @@ ${aiReport.advice.map(a => '• ' + a).join('\n')}
               </div>
             )}
           </div>
-
-
-          {/* Card: income total (no USD pool block) */}
         </div>
       ) : (
-        <div className="glass-panel" style={{ padding: '24px', textAlign: 'center', marginBottom: '20px' }}>
-          <p className="text-muted" style={{ marginBottom: '4px' }}>Всего доходов (UZS)</p>
-          <h3 className="text-gradient" style={{ fontSize: '32px', fontWeight: 700 }}>
-            {formatCurrency(totalAmount, 'UZS')}
-          </h3>
+        /* Income summary block */
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
+          <div className="glass-panel" style={{ padding: '20px', background: 'rgba(34, 197, 94, 0.05)', borderLeft: '4px solid var(--success)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+              <TrendingUp size={18} style={{ color: 'var(--success)' }} />
+              <p className="text-muted" style={{ fontSize: '13px', margin: 0 }}>Всего доходов (эквивалент в UZS)</p>
+            </div>
+            <h3 style={{ fontSize: '28px', fontWeight: 700, color: 'var(--success)', margin: '4px 0 0' }}>
+              +{formatCurrency(totalIncomeUZS, 'UZS')}
+            </h3>
+            {totalUSDIncome > 0 && (
+              <p className="text-muted" style={{ fontSize: '12px', marginTop: '6px', margin: 0 }}>
+                в т.ч. в USD: {formatCurrency(totalUSDIncome, 'USD')} ({formatCurrency(usdIncomeInUZS, 'UZS')})
+              </p>
+            )}
+          </div>
+
+          {/* Income by accounts */}
+          {incomeByAccounts.length > 0 && (
+            <div>
+              <p className="text-muted" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', marginBottom: '8px', letterSpacing: '0.5px' }}>
+                Поступления по картам и счетам
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '8px' }}>
+                {incomeByAccounts.map(acc => (
+                  <div key={acc.id} className="glass-panel" style={{ padding: '10px 12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                      <Wallet size={14} color="var(--accent-primary)" />
+                      <p className="text-muted" style={{ fontSize: '12px', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {acc.name}
+                      </p>
+                    </div>
+                    {acc.totalUZS > 0 && (
+                      <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--success)', margin: 0 }}>
+                        +{formatCurrency(acc.totalUZS, 'UZS')}
+                      </p>
+                    )}
+                    {acc.totalUSD > 0 && (
+                      <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--success)', margin: 0 }}>
+                        +{formatCurrency(acc.totalUSD, 'USD')}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -518,37 +623,40 @@ ${aiReport.advice.map(a => '• ' + a).join('\n')}
           {hasGeminiKey() && (
             <div>
               {isAiLoading ? <Loader2 size={20} className="animate-spin" color="#a855f7" /> : (
-                isAiExpanded ? <ChevronUp size={20} color="#a855f7" /> : <ChevronDown size={20} color="#a855f7" />
+                isAiExpanded ? <ChevronUp size={20} color="var(--text-muted)" /> : <ChevronDown size={20} color="var(--text-muted)" />
               )}
             </div>
           )}
         </div>
 
         {/* AI Report Content */}
-        {isAiExpanded && (
-          <div style={{
-            background: 'var(--glass-bg)',
-            border: '1px solid rgba(168,85,247,0.3)',
+        {hasGeminiKey() && isAiExpanded && (
+          <div className="glass-panel" style={{
+            padding: '16px',
             borderTop: 'none',
             borderRadius: '0 0 var(--radius-md) var(--radius-md)',
-            padding: '20px',
-            animation: 'fadeIn 0.3s ease-out'
+            animation: 'fadeIn 0.2s ease-out'
           }}>
             {aiError && (
-              <p style={{ color: 'var(--danger)', fontSize: '13px', textAlign: 'center', margin: 0 }}>{aiError}</p>
-            )}
-            
-            {!aiError && isAiLoading && (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', padding: '20px 0' }}>
-                <Loader2 size={28} className="animate-spin" color="#a855f7" />
-                <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Анализирую ваши финансы...</p>
+              <div style={{ padding: '12px', background: 'var(--danger-bg)', color: 'var(--danger)', borderRadius: 'var(--radius-sm)', fontSize: '13px' }}>
+                {aiError}
               </div>
             )}
 
-            {!aiError && !isAiLoading && aiReport && (
+            {isAiLoading && (
+              <div style={{ padding: '24px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+                <Loader2 size={28} className="animate-spin" color="#a855f7" />
+                <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Анализирую ваши финансы с помощью Gemini...</span>
+              </div>
+            )}
+
+            {aiReport && !isAiLoading && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <div style={{ padding: '12px', background: 'rgba(168,85,247,0.1)', borderRadius: 'var(--radius-sm)' }}>
-                  <p style={{ fontSize: '14px', lineHeight: 1.5, margin: 0, fontWeight: 500, color: 'var(--text-primary)' }}>
+                <div>
+                  <h4 style={{ fontSize: '13px', fontWeight: 600, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '6px', letterSpacing: '0.5px' }}>
+                    📋 Резюме
+                  </h4>
+                  <p style={{ fontSize: '14px', lineHeight: 1.5, margin: 0, color: 'var(--text-primary)' }}>
                     {aiReport.summary}
                   </p>
                 </div>
@@ -627,7 +735,7 @@ ${aiReport.advice.map(a => '• ' + a).join('\n')}
       {/* Categories section */}
       <div>
         <h3 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '12px' }}>
-          {type === 'expense' ? 'Траты' : 'Сумма'} по категориям
+          {type === 'expense' ? 'Траты' : 'Поступления'} по категориям
         </h3>
 
         {sortedCategories.length === 0 ? (
@@ -640,10 +748,10 @@ ${aiReport.advice.map(a => '• ' + a).join('\n')}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               {sortedCategories.map(item => {
                 const IconComp = getIcon(item.category?.iconName || '');
-                const color = item.category?.color || 'var(--accent-primary)';
+                const color = item.category?.color || (type === 'income' ? 'var(--success)' : 'var(--accent-primary)');
                 return (
                   <div key={item.category?.id || Math.random()}
-                    onClick={() => { if (item.category?.id) navigate(`/history?category=${item.category.id}`); }}
+                    onClick={() => { if (item.category?.id) navigate(`/history?category=${item.category.id}&type=${type}`); }}
                     style={{ cursor: 'pointer' }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
@@ -652,7 +760,9 @@ ${aiReport.advice.map(a => '• ' + a).join('\n')}
                         <span style={{ fontWeight: 500, fontSize: '14px' }}>{item.category?.name || 'Неизвестно'}</span>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontWeight: 600, fontSize: '14px' }}>{formatCurrency(item.amount, 'UZS')}</span>
+                        <span style={{ fontWeight: 600, fontSize: '14px', color: type === 'income' ? 'var(--success)' : 'var(--text-primary)' }}>
+                          {type === 'income' ? '+' : ''}{formatCurrency(item.amount, 'UZS')}
+                        </span>
                         <span style={{ fontSize: '12px', fontWeight: 600, padding: '2px 6px', borderRadius: '10px', background: `${color}22`, color, minWidth: '42px', textAlign: 'center' }}>
                           {item.percentage.toFixed(1)}%
                         </span>
