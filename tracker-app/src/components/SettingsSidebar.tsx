@@ -1,11 +1,20 @@
-import { X, Moon, Sun, Globe, Edit2, Shield, ShieldOff, Trash2, Link as LinkIcon, Unlink, Phone, Mail, Loader2, Brain, Eye, EyeOff, Check } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { X, Moon, Sun, Globe, Edit2, Shield, ShieldOff, Trash2, Link as LinkIcon, Unlink, Phone, Mail, Loader2, Brain, Eye, EyeOff, Check, Target, Upload, Lock, Fingerprint } from 'lucide-react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import { isAccountProtected } from '../types';
-import { auth } from '../firebase';
+import { auth, db, doc, setDoc, getDocs, query, collection, where } from '../firebase';
 import { getGeminiKey, setGeminiKey, removeGeminiKey, hasGeminiKey, FINANCIAL_STRATEGIES } from '../lib/gemini';
 import { useFinancialStrategy } from '../hooks/useFinancialStrategy';
+import {
+  hasPinEnabled,
+  setSecurityPin,
+  clearSecurityPin,
+  isBiometricSupported,
+  hasBiometricEnabled,
+  registerBiometricUnlock,
+  disableBiometricUnlock,
+} from '../lib/securityLock';
 import { 
   GoogleAuthProvider, 
   EmailAuthProvider, 
@@ -17,6 +26,8 @@ import {
   RecaptchaVerifier, 
   ConfirmationResult 
 } from 'firebase/auth';
+
+const ImportModal = lazy(() => import('./ImportModal'));
 
 declare global {
   interface Window {
@@ -36,6 +47,24 @@ export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProp
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'system');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+  const [importOpen, setImportOpen] = useState(false);
+
+  // Security PIN & Biometric states
+  const [pinActive, setPinActive] = useState(() => hasPinEnabled());
+  const [pinInput, setPinInput] = useState('');
+  const [showPinForm, setShowPinForm] = useState(false);
+  const [bioSupported, setBioSupported] = useState(false);
+  const [bioActive, setBioActive] = useState(() => hasBiometricEnabled());
+
+  useEffect(() => {
+    isBiometricSupported().then(setBioSupported);
+    const syncPin = () => {
+      setPinActive(hasPinEnabled());
+      setBioActive(hasBiometricEnabled());
+    };
+    window.addEventListener('fintracker-pin-changed', syncPin);
+    return () => window.removeEventListener('fintracker-pin-changed', syncPin);
+  }, []);
   
   // Linking states
   const [providers, setProviders] = useState<string[]>([]);
@@ -125,8 +154,6 @@ export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProp
 
     const checkTelegramLink = async () => {
       try {
-        const { getDocs, query, collection, where } = await import('firebase/firestore');
-        const { db } = await import('../firebase');
         const q = query(collection(db, 'telegramUsers'), where('userId', '==', auth.currentUser!.uid));
         const snap = await getDocs(q);
         if (!snap.empty) {
@@ -149,9 +176,6 @@ export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProp
     setTgLoading(true);
     try {
       const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-      const { doc, setDoc } = await import('firebase/firestore');
-      const { db } = await import('../firebase');
-      
       await setDoc(doc(db, 'linkCodes', code), {
         userId: auth.currentUser.uid,
         createdAt: new Date()
@@ -541,17 +565,182 @@ export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProp
         </div>
 
         <div>
-          <label className="text-muted" style={{ display: 'block', fontSize: '14px', marginBottom: '12px' }}>Категории</label>
-          <button 
-            style={{ width: '100%', padding: '16px', borderRadius: 'var(--radius-md)', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '12px', color: 'var(--text-primary)' }}
-            onClick={() => {
-              onClose();
-              navigate('/categories');
-            }}
-          >
-            <Edit2 size={20} />
-            <span style={{ flex: 1, textAlign: 'left', fontWeight: 500 }}>Управление категориями</span>
-          </button>
+          <label className="text-muted" style={{ display: 'block', fontSize: '14px', marginBottom: '12px' }}>Разделы и данные</label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <button 
+              style={{ width: '100%', padding: '16px', borderRadius: 'var(--radius-md)', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '12px', color: 'var(--text-primary)' }}
+              onClick={() => {
+                onClose();
+                navigate('/categories');
+              }}
+            >
+              <Edit2 size={20} />
+              <span style={{ flex: 1, textAlign: 'left', fontWeight: 500 }}>Управление категориями</span>
+            </button>
+            <button 
+              style={{ width: '100%', padding: '16px', borderRadius: 'var(--radius-md)', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '12px', color: 'var(--text-primary)' }}
+              onClick={() => {
+                onClose();
+                navigate('/planning');
+              }}
+            >
+              <Target size={20} style={{ color: 'var(--accent-primary)' }} />
+              <span style={{ flex: 1, textAlign: 'left', fontWeight: 500 }}>Цели, Долги и Подписки</span>
+            </button>
+            <button 
+              style={{ width: '100%', padding: '16px', borderRadius: 'var(--radius-md)', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '12px', color: 'var(--text-primary)' }}
+              onClick={() => setImportOpen(true)}
+            >
+              <Upload size={20} style={{ color: 'var(--success)' }} />
+              <span style={{ flex: 1, textAlign: 'left', fontWeight: 500 }}>Импорт из CSV / Excel</span>
+            </button>
+          </div>
+        </div>
+
+        {/* ─── Security PIN & Biometric Section ─── */}
+        <div>
+          <label className="text-muted" style={{ display: 'block', fontSize: '14px', marginBottom: '12px' }}>Безопасность</label>
+          <div style={{
+            background: 'var(--bg-secondary)',
+            borderRadius: 'var(--radius-md)',
+            padding: '16px',
+            border: pinActive ? '1px solid var(--success)' : '1px solid var(--border-color)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Lock size={20} style={{ color: pinActive ? 'var(--success)' : 'var(--text-muted)' }} />
+                <div>
+                  <p style={{ fontWeight: 600, fontSize: '14px', margin: 0 }}>PIN-код при входе</p>
+                  <p className="text-muted" style={{ fontSize: '11px', margin: 0 }}>
+                    {pinActive ? 'Защита активна (4 цифры)' : 'Защитите приложение от посторонних'}
+                  </p>
+                </div>
+              </div>
+              {pinActive ? (
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPinInput('');
+                      setShowPinForm(v => !v);
+                    }}
+                    style={{ fontSize: '12px', color: 'var(--accent-primary)', fontWeight: 600 }}
+                  >
+                    Сменить
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (confirm('Отключить защиту PIN-кодом?')) {
+                        clearSecurityPin();
+                        setShowPinForm(false);
+                      }
+                    }}
+                    style={{ fontSize: '12px', color: 'var(--danger)', fontWeight: 600 }}
+                  >
+                    Выкл
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPinInput('');
+                    setShowPinForm(v => !v);
+                  }}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: 'var(--radius-sm)',
+                    background: 'var(--accent-primary)',
+                    color: 'white',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                  }}
+                >
+                  Включить
+                </button>
+              )}
+            </div>
+
+            {showPinForm && (
+              <form
+                onSubmit={async e => {
+                  e.preventDefault();
+                  if (!/^\d{4}$/.test(pinInput)) return;
+                  await setSecurityPin(pinInput);
+                  setPinInput('');
+                  setShowPinForm(false);
+                }}
+                style={{ display: 'flex', gap: '8px' }}
+              >
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={4}
+                  pattern="\d{4}"
+                  placeholder="Введите 4 цифры"
+                  value={pinInput}
+                  onChange={e => setPinInput(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                  autoFocus
+                  required
+                  style={{ flex: 1, fontSize: '14px', letterSpacing: '4px', textAlign: 'center' }}
+                />
+                <button
+                  type="submit"
+                  disabled={pinInput.length !== 4}
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: 'var(--radius-sm)',
+                    background: 'var(--success)',
+                    color: 'white',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    opacity: pinInput.length === 4 ? 1 : 0.5,
+                  }}
+                >
+                  Сохранить
+                </button>
+              </form>
+            )}
+
+            {pinActive && bioSupported && (
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                borderTop: '1px solid var(--border-color)',
+                paddingTop: '10px',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Fingerprint size={18} style={{ color: bioActive ? 'var(--accent-primary)' : 'var(--text-muted)' }} />
+                  <span style={{ fontSize: '13px', fontWeight: 500 }}>FaceID / TouchID</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (bioActive) {
+                      disableBiometricUnlock();
+                    } else {
+                      const ok = await registerBiometricUnlock(auth.currentUser?.email || 'FinTracker');
+                      if (!ok) {
+                        alert('Не удалось привязать биометрию на этом устройстве.');
+                      }
+                    }
+                  }}
+                  style={{
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    color: bioActive ? 'var(--danger)' : 'var(--accent-primary)',
+                  }}
+                >
+                  {bioActive ? 'Отключить' : 'Подключить'}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* ─── AI Key Section ─── */}
@@ -703,6 +892,11 @@ export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProp
           </button>
         </div>
       </div>
+      {importOpen && (
+        <Suspense fallback={null}>
+          <ImportModal isOpen={importOpen} onClose={() => setImportOpen(false)} />
+        </Suspense>
+      )}
       <style>{`
         @keyframes slideInRight {
           from { transform: translateX(100%); }

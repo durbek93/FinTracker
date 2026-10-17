@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import { getIcon } from '../lib/icons';
-import { PieChart, BarChart2, TrendingDown, TrendingUp, Calendar, Brain, Sparkles, Loader2, ChevronDown, ChevronUp, Download, Wallet } from 'lucide-react';
-import { format, startOfMonth, endOfMonth, startOfDay, endOfDay, isValid } from 'date-fns';
+import { PieChart, BarChart2, TrendingDown, TrendingUp, Calendar, Brain, Sparkles, Loader2, ChevronDown, ChevronUp, Download, Wallet, Flame } from 'lucide-react';
+import { format, startOfMonth, endOfMonth, startOfDay, endOfDay, isValid, differenceInCalendarDays, subDays, eachDayOfInterval, getDaysInMonth } from 'date-fns';
+import { ru } from 'date-fns/locale';
 import { getFinancialAdvice, AnalystReport, hasGeminiKey } from '../lib/gemini';
 import { useFinancialStrategy } from '../hooks/useFinancialStrategy';
 
@@ -61,16 +62,91 @@ function DonutChart({ slices }: { slices: DonutSlice[] }) {
   );
 }
 
+// ── SVG Daily Trend Chart ──────────────────────────────────────────────────
+interface DailyPoint { dateStr: string; label: string; amount: number; }
+
+function DailyTrendChart({ data, color }: { data: DailyPoint[]; color: string }) {
+  const [activeIdx, setActiveIdx] = useState<number | null>(null);
+  if (data.length === 0) return null;
+
+  const maxAmount = Math.max(...data.map(d => d.amount), 1);
+  const activePoint = activeIdx !== null ? data[activeIdx] : data.reduce((best, cur) => (cur.amount > best.amount ? cur : best), data[0]);
+
+  return (
+    <div className="glass-panel" style={{ padding: '16px', marginBottom: '20px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', gap: '8px', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: '14px', fontWeight: 600 }}>Динамика по дням</span>
+        {activePoint && (
+          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+            {activeIdx !== null ? 'Выбрано' : 'Пик'} ({activePoint.label}):{' '}
+            <b style={{ color: 'var(--text-primary)' }}>{formatCurrency(activePoint.amount, 'UZS')}</b>
+          </span>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: data.length > 20 ? '3px' : '6px', height: '100px', paddingTop: '10px' }}>
+        {data.map((pt, idx) => {
+          const heightPct = maxAmount > 0 ? Math.max(pt.amount > 0 ? 6 : 2, (pt.amount / maxAmount) * 100) : 2;
+          const isSelected = activeIdx === idx;
+          return (
+            <div
+              key={pt.dateStr}
+              onMouseEnter={() => setActiveIdx(idx)}
+              onMouseLeave={() => setActiveIdx(null)}
+              onClick={() => setActiveIdx(activeIdx === idx ? null : idx)}
+              style={{
+                flex: 1,
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'flex-end',
+                alignItems: 'center',
+                cursor: 'pointer',
+                minWidth: 0
+              }}
+              title={`${pt.label}: ${formatCurrency(pt.amount, 'UZS')}`}
+            >
+              <div
+                style={{
+                  width: '100%',
+                  height: `${heightPct}%`,
+                  background: pt.amount === 0 ? 'var(--bg-tertiary)' : color,
+                  opacity: activeIdx === null || isSelected ? 1 : 0.45,
+                  borderRadius: '3px 3px 1px 1px',
+                  transition: 'height 0.3s ease, opacity 0.15s ease'
+                }}
+              />
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '6px', fontSize: '10px', color: 'var(--text-muted)' }}>
+        <span>{data[0]?.label}</span>
+        {data.length > 2 && <span>{data[Math.floor(data.length / 2)]?.label}</span>}
+        {data.length > 1 && <span>{data[data.length - 1]?.label}</span>}
+      </div>
+    </div>
+  );
+}
+
 // ── Main Component ─────────────────────────────────────────────────────────
 export default function Analytics() {
-  const { transactions: storeTransactions, categories, accounts } = useStore();
+  const { transactions: storeTransactions, categories, accounts, goals, debts, subscriptions } = useStore();
   const navigate = useNavigate();
 
   const { strategyId, currentStrategy: strategy, personalInstructions } = useFinancialStrategy();
 
   const [startDate, setStartDate] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
   const [endDate, setEndDate] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
+  const [selectedTag, setSelectedTag] = useState<string>('');
   const [isFilterOpen, setIsFilterOpen] = useState(false);
+
+  // Extract all unique tags
+  const allTags = useMemo(
+    () => Array.from(new Set(storeTransactions.flatMap(t => t.tags || []))),
+    [storeTransactions]
+  );
 
   // AI State
   const [aiReport, setAiReport] = useState<AnalystReport | null>(null);
@@ -88,11 +164,12 @@ export default function Analytics() {
     }
   };
 
-  // Filter out excluded and apply date range
+  // Filter out excluded and apply date range + tag filter
   const transactions = storeTransactions.filter(t => {
     if (t.excludeFromStats) return false;
     const cat = categories.find(c => c.id === t.categoryId);
     if (cat?.excludeFromStats) return false;
+    if (selectedTag && (!t.tags || !t.tags.includes(selectedTag))) return false;
 
     const tDate = new Date(t.date);
 
@@ -107,6 +184,46 @@ export default function Analytics() {
 
     return true;
   });
+
+  // ── Previous Period (MoM) calculation ────────────────────────────────────
+  const prevPeriodStats = useMemo(() => {
+    if (!startDate || !endDate) return null;
+    const sDate = startOfDay(new Date(startDate));
+    const eDate = endOfDay(new Date(endDate));
+    if (!isValid(sDate) || !isValid(eDate) || eDate < sDate) return null;
+
+    const daysSpan = Math.max(1, differenceInCalendarDays(eDate, sDate) + 1);
+    const prevEnd = endOfDay(subDays(sDate, 1));
+    const prevStart = startOfDay(subDays(sDate, daysSpan));
+
+    let prevExpenseTotal = 0;
+    let prevIncomeTotal = 0;
+    const prevByCategory: Record<string, number> = {};
+
+    for (const t of storeTransactions) {
+      if (t.excludeFromStats) continue;
+      const cat = categories.find(c => c.id === t.categoryId);
+      if (cat?.excludeFromStats) continue;
+      if (selectedTag && (!t.tags || !t.tags.includes(selectedTag))) continue;
+
+      const d = new Date(t.date);
+      if (d < prevStart || d > prevEnd) continue;
+
+      const amtUZS = t.currency === 'UZS'
+        ? t.amount
+        : (t.convertedAmount ?? (t.exchangeRate ? t.amount * t.exchangeRate : 0));
+
+      if (t.type === 'expense') {
+        prevExpenseTotal += amtUZS;
+        prevByCategory[t.categoryId] = (prevByCategory[t.categoryId] || 0) + amtUZS;
+      } else if (t.type === 'income') {
+        prevIncomeTotal += amtUZS;
+        prevByCategory[t.categoryId] = (prevByCategory[t.categoryId] || 0) + amtUZS;
+      }
+    }
+
+    return { prevExpenseTotal, prevIncomeTotal, prevByCategory };
+  }, [storeTransactions, categories, startDate, endDate, selectedTag]);
 
   const [type, setType] = useState<'expense' | 'income'>('expense');
   const [chartMode, setChartMode] = useState<'donut' | 'bar'>('donut');
@@ -169,6 +286,75 @@ export default function Analytics() {
   // Net Balance (Сальдо / Дельта за период)
   const netBalance = totalIncomeUZS - grandTotal;
 
+  // MoM Deltas
+  const expenseMomPct = prevPeriodStats && prevPeriodStats.prevExpenseTotal > 0
+    ? ((grandTotal - prevPeriodStats.prevExpenseTotal) / prevPeriodStats.prevExpenseTotal) * 100
+    : null;
+  const incomeMomPct = prevPeriodStats && prevPeriodStats.prevIncomeTotal > 0
+    ? ((totalIncomeUZS - prevPeriodStats.prevIncomeTotal) / prevPeriodStats.prevIncomeTotal) * 100
+    : null;
+
+  // ── Burn Rate & End of Month Forecast ────────────────────────────────────
+  const burnRateStats = useMemo(() => {
+    if (!startDate || !endDate) return null;
+    const sDate = startOfDay(new Date(startDate));
+    const eDate = endOfDay(new Date(endDate));
+    if (!isValid(sDate) || !isValid(eDate) || eDate < sDate) return null;
+
+    const now = new Date();
+    const effectiveEnd = now < eDate ? now : eDate;
+    const elapsedDays = Math.max(1, differenceInCalendarDays(effectiveEnd, sDate) + 1);
+    const avgDailyExpense = grandTotal / elapsedDays;
+    const totalDaysInSelectedMonth = getDaysInMonth(sDate);
+    const isCurrentMonthPeriod =
+      startDate === format(startOfMonth(now), 'yyyy-MM-dd') &&
+      endDate === format(endOfMonth(now), 'yyyy-MM-dd');
+    const projectedMonthExpense = isCurrentMonthPeriod
+      ? avgDailyExpense * totalDaysInSelectedMonth
+      : null;
+
+    const totalMonthlyBudget = categories
+      .filter(c => c.type === 'expense' && (c.monthlyBudgetUZS || 0) > 0)
+      .reduce((sum, c) => sum + (c.monthlyBudgetUZS || 0), 0);
+
+    return {
+      elapsedDays,
+      avgDailyExpense,
+      projectedMonthExpense,
+      totalMonthlyBudget,
+    };
+  }, [startDate, endDate, grandTotal, categories]);
+
+  // ── Daily Trend Data ─────────────────────────────────────────────────────
+  const dailyTrendData: DailyPoint[] = useMemo(() => {
+    if (!startDate || !endDate) return [];
+    const sDate = startOfDay(new Date(startDate));
+    const eDate = endOfDay(new Date(endDate));
+    if (!isValid(sDate) || !isValid(eDate) || eDate < sDate) return [];
+    if (differenceInCalendarDays(eDate, sDate) > 62) return []; // Skip daily bars for very long multi-month ranges
+
+    const days = eachDayOfInterval({ start: sDate, end: eDate });
+    const totalsByDay: Record<string, number> = {};
+
+    const sourceTxs = type === 'expense' ? expenseTxs : incomeTxs;
+    for (const t of sourceTxs) {
+      const dayKey = format(new Date(t.date), 'yyyy-MM-dd');
+      const amtUZS = t.currency === 'UZS'
+        ? t.amount
+        : (t.convertedAmount ?? (t.exchangeRate ? t.amount * t.exchangeRate : 0));
+      totalsByDay[dayKey] = (totalsByDay[dayKey] || 0) + amtUZS;
+    }
+
+    return days.map(d => {
+      const key = format(d, 'yyyy-MM-dd');
+      return {
+        dateStr: key,
+        label: format(d, 'd MMM', { locale: ru }),
+        amount: totalsByDay[key] || 0,
+      };
+    });
+  }, [startDate, endDate, type, expenseTxs, incomeTxs]);
+
   // Group incomes by account
   const accountIncomeMap: Record<string, { uzs: number; usd: number }> = {};
   incomeTxs.forEach(t => {
@@ -205,11 +391,16 @@ export default function Analytics() {
   });
 
   const sortedCategories = Object.entries(categoryTotals)
-    .map(([id, amount]) => ({
-      category: categories.find(c => c.id === id),
-      amount,
-      percentage: totalAmount > 0 ? (amount / totalAmount) * 100 : 0,
-    }))
+    .map(([id, amount]) => {
+      const prevAmt = prevPeriodStats?.prevByCategory[id] || 0;
+      const momPct = prevAmt > 0 ? ((amount - prevAmt) / prevAmt) * 100 : null;
+      return {
+        category: categories.find(c => c.id === id),
+        amount,
+        percentage: totalAmount > 0 ? (amount / totalAmount) * 100 : 0,
+        momPct,
+      };
+    })
     .sort((a, b) => b.amount - a.amount);
 
   const donutSlices: DonutSlice[] = sortedCategories.map(item => ({
@@ -249,13 +440,52 @@ export default function Analytics() {
         percentage: totalCategorizedExpenses > 0 ? Number(((amt / totalCategorizedExpenses) * 100).toFixed(1)) : 0
       })).sort((a,b) => b.amount - a.amount);
 
+      const categoryBudgets = categories
+        .filter(c => c.type === 'expense' && (c.monthlyBudgetUZS || 0) > 0)
+        .map(c => {
+          const spent = expCatTotals[c.id] || 0;
+          const limit = c.monthlyBudgetUZS || 0;
+          return {
+            category: c.name,
+            spent,
+            limit,
+            pct: limit > 0 ? Math.round((spent / limit) * 100) : 0,
+          };
+        });
+
+      const goalsSummary = {
+        count: goals.length,
+        totalSavedUZS: goals.filter(g => g.currency === 'UZS').reduce((s, g) => s + g.currentAmount, 0),
+        totalTargetUZS: goals.filter(g => g.currency === 'UZS').reduce((s, g) => s + g.targetAmount, 0),
+      };
+
+      const debtsSummary = {
+        lentUZS: debts.filter(d => !d.isSettled && d.type === 'lent' && d.currency === 'UZS').reduce((s, d) => s + Math.max(0, d.totalAmount - d.paidAmount), 0),
+        borrowedUZS: debts.filter(d => !d.isSettled && d.type === 'borrowed' && d.currency === 'UZS').reduce((s, d) => s + Math.max(0, d.totalAmount - d.paidAmount), 0),
+      };
+
+      const monthlySubscriptionsUZS = Math.round(
+        subscriptions
+          .filter(s => s.isActive && s.type === 'expense' && s.currency === 'UZS')
+          .reduce((acc, s) => {
+            if (s.interval === 'weekly') return acc + s.amount * 4.33;
+            if (s.interval === 'yearly') return acc + s.amount / 12;
+            return acc + s.amount;
+          }, 0)
+      );
+
       const statsData = {
         totalExpenses: grandTotal,
         categorizedExpensesTotal: totalCategorizedExpenses,
         totalIncome: totalIncomeUZS,
         expensesByCategory,
         incomesByCategory,
-        usdPoolRemaining
+        usdPoolRemaining,
+        categoryBudgets,
+        burnRate: burnRateStats,
+        goalsSummary,
+        debtsSummary,
+        monthlySubscriptionsUZS,
       };
 
       const report = await getFinancialAdvice(statsData, strategyId, personalInstructions);
@@ -325,6 +555,11 @@ ${aiReport.advice.map(a => '• ' + a).join('\n')}
             +{formatCurrency(totalIncomeUZS, '')}
           </p>
           <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>UZS</span>
+          {incomeMomPct !== null && (
+            <div style={{ fontSize: '10px', fontWeight: 600, marginTop: '3px', color: incomeMomPct >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+              {incomeMomPct >= 0 ? '+' : ''}{incomeMomPct.toFixed(0)}% к прошл.
+            </div>
+          )}
         </div>
         <div style={{ padding: '4px', borderLeft: '1px solid var(--border-color)', borderRight: '1px solid var(--border-color)' }}>
           <p className="text-muted" style={{ fontSize: '11px', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Расход</p>
@@ -332,6 +567,11 @@ ${aiReport.advice.map(a => '• ' + a).join('\n')}
             -{formatCurrency(grandTotal, '')}
           </p>
           <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>UZS</span>
+          {expenseMomPct !== null && (
+            <div style={{ fontSize: '10px', fontWeight: 600, marginTop: '3px', color: expenseMomPct <= 0 ? 'var(--success)' : 'var(--danger)' }}>
+              {expenseMomPct >= 0 ? '+' : ''}{expenseMomPct.toFixed(0)}% к прошл.
+            </div>
+          )}
         </div>
         <div style={{ padding: '4px' }}>
           <p className="text-muted" style={{ fontSize: '11px', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Сальдо</p>
@@ -427,6 +667,32 @@ ${aiReport.advice.map(a => '• ' + a).join('\n')}
             </div>
           </div>
         )}
+
+        {/* Tag Filter Pills */}
+        {allTags.length > 0 && (
+          <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingTop: '10px', paddingBottom: '2px', alignItems: 'center' }}>
+            <span className="text-muted" style={{ fontSize: '12px', flexShrink: 0 }}>Тег:</span>
+            {allTags.map(tg => {
+              const active = selectedTag === tg;
+              return (
+                <button
+                  key={tg}
+                  type="button"
+                  onClick={() => setSelectedTag(active ? '' : tg)}
+                  style={{
+                    fontSize: '12px', padding: '4px 10px', borderRadius: '999px', flexShrink: 0,
+                    background: active ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
+                    color: active ? '#fff' : 'var(--text-muted)',
+                    border: `1px solid ${active ? 'var(--accent-primary)' : 'var(--border-color)'}`,
+                    fontWeight: active ? 600 : 400, cursor: 'pointer'
+                  }}
+                >
+                  #{tg}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* ── Summary cards depending on tab ── */}
@@ -464,6 +730,39 @@ ${aiReport.advice.map(a => '• ' + a).join('\n')}
               </p>
             )}
           </div>
+
+          {/* Burn Rate & End of Month Forecast Card */}
+          {burnRateStats && grandTotal > 0 && (
+            <div className="glass-panel" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Flame size={16} color="#f59e0b" />
+                  <span style={{ fontSize: '13px', fontWeight: 600 }}>Темп расходов ({burnRateStats.elapsedDays} дн.)</span>
+                </div>
+                <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  ~{formatCurrency(burnRateStats.avgDailyExpense, 'UZS')} / день
+                </span>
+              </div>
+              {burnRateStats.projectedMonthExpense !== null && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: 'var(--text-muted)' }}>
+                  <span>Прогноз к концу месяца:</span>
+                  <b style={{
+                    color: burnRateStats.totalMonthlyBudget > 0 && burnRateStats.projectedMonthExpense > burnRateStats.totalMonthlyBudget
+                      ? 'var(--danger)'
+                      : 'var(--text-primary)'
+                  }}>
+                    ~{formatCurrency(burnRateStats.projectedMonthExpense, 'UZS')}
+                  </b>
+                </div>
+              )}
+              {burnRateStats.totalMonthlyBudget > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: 'var(--text-muted)' }}>
+                  <span>Суммарный лимит по категориям:</span>
+                  <b>{formatCurrency(burnRateStats.totalMonthlyBudget, 'UZS')}</b>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Collapsible details wrapper */}
           <div style={{
@@ -580,6 +879,14 @@ ${aiReport.advice.map(a => '• ' + a).join('\n')}
             </div>
           )}
         </div>
+      )}
+
+      {/* ── Daily Trend Bar Chart ── */}
+      {dailyTrendData.some(d => d.amount > 0) && (
+        <DailyTrendChart
+          data={dailyTrendData}
+          color={type === 'expense' ? 'var(--accent-primary)' : 'var(--success)'}
+        />
       )}
 
       {/* ── AI Analyst Section ── */}
@@ -749,15 +1056,30 @@ ${aiReport.advice.map(a => '• ' + a).join('\n')}
               {sortedCategories.map(item => {
                 const IconComp = getIcon(item.category?.iconName || '');
                 const color = item.category?.color || (type === 'income' ? 'var(--success)' : 'var(--accent-primary)');
+                const budgetLimit = type === 'expense' ? (item.category?.monthlyBudgetUZS || 0) : 0;
+                const budgetPct = budgetLimit > 0 ? (item.amount / budgetLimit) * 100 : 0;
+                const budgetColor = budgetPct >= 100 ? 'var(--danger)' : budgetPct >= 80 ? '#f59e0b' : 'var(--success)';
+
                 return (
                   <div key={item.category?.id || Math.random()}
-                    onClick={() => { if (item.category?.id) navigate(`/history?category=${item.category.id}&type=${type}`); }}
+                    onClick={() => { if (item.category?.id) navigate(`/history?category=${item.category.id}&type=${type}${selectedTag ? `&tag=${selectedTag}` : ''}`); }}
                     style={{ cursor: 'pointer' }}
                   >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', gap: '8px', flexWrap: 'wrap' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         {IconComp && <IconComp size={16} color={color} />}
                         <span style={{ fontWeight: 500, fontSize: '14px' }}>{item.category?.name || 'Неизвестно'}</span>
+                        {item.momPct !== null && (
+                          <span style={{
+                            fontSize: '10px', fontWeight: 600, padding: '1px 5px', borderRadius: '6px',
+                            background: 'var(--bg-tertiary)',
+                            color: type === 'expense'
+                              ? (item.momPct <= 0 ? 'var(--success)' : 'var(--danger)')
+                              : (item.momPct >= 0 ? 'var(--success)' : 'var(--danger)')
+                          }}>
+                            {item.momPct >= 0 ? '+' : ''}{item.momPct.toFixed(0)}%
+                          </span>
+                        )}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <span style={{ fontWeight: 600, fontSize: '14px', color: type === 'income' ? 'var(--success)' : 'var(--text-primary)' }}>
@@ -771,6 +1093,18 @@ ${aiReport.advice.map(a => '• ' + a).join('\n')}
                     <div style={{ width: '100%', height: '6px', background: 'var(--bg-tertiary)', borderRadius: '3px', overflow: 'hidden' }}>
                       <div style={{ width: `${item.percentage}%`, height: '100%', background: color, borderRadius: '3px', transition: 'width 0.5s cubic-bezier(0.16, 1, 0.3, 1)' }} />
                     </div>
+                    {budgetLimit > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px', fontSize: '11px' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>
+                          Бюджет: {formatCurrency(item.amount, '')} / {formatCurrency(budgetLimit, 'UZS')}
+                        </span>
+                        <span style={{ fontWeight: 600, color: budgetColor }}>
+                          {budgetPct >= 100
+                            ? `Перерасход +${formatCurrency(item.amount - budgetLimit, 'UZS')}`
+                            : `${Math.round(budgetPct)}% лимита`}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 );
               })}

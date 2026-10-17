@@ -1,5 +1,22 @@
 import { initializeApp } from "firebase/app";
-import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, query, orderBy, updateDoc, setDoc, where, getDocs } from 'firebase/firestore';
+import {
+  initializeFirestore,
+  getFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  collection,
+  addDoc,
+  onSnapshot,
+  deleteDoc,
+  doc,
+  query,
+  orderBy,
+  updateDoc,
+  setDoc,
+  where,
+  getDocs,
+  writeBatch,
+} from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 
 const firebaseConfig = {
@@ -11,10 +28,24 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
-// Initialize Firebase
+// Initialize Firebase with persistent offline cache (IndexedDB + multi-tab)
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+
+const createFirestoreDb = () => {
+  try {
+    return initializeFirestore(app, {
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager(),
+      }),
+    });
+  } catch (err) {
+    console.warn('Persistent Firestore cache unavailable, falling back to memory cache:', err);
+    return getFirestore(app);
+  }
+};
+
+export const db = createFirestoreDb();
 export const auth = getAuth(app);
 
 // Export collections and utils
-export { collection, addDoc, onSnapshot, deleteDoc, doc, query, orderBy, updateDoc, setDoc, where, getDocs };
+export { collection, addDoc, onSnapshot, deleteDoc, doc, query, orderBy, updateDoc, setDoc, where, getDocs, writeBatch };

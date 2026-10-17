@@ -1,12 +1,14 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, lazy, Suspense } from 'react';
 import { useStore } from '../store';
 import { getIcon } from '../lib/icons';
 import { format, isSameDay, startOfDay, endOfDay, startOfMonth, endOfMonth, isValid } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { Wallet, Download, FileSpreadsheet, FileText, Table, ArrowLeft, Eye, EyeOff } from 'lucide-react';
+import { Wallet, Download, Upload, FileSpreadsheet, FileText, Table, ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import { Transaction } from '../types';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { exportToCSV, exportToXLSX, exportToPDF } from '../lib/exportUtils';
+
+const ImportModal = lazy(() => import('../components/ImportModal'));
 
 // Formatter function
 const formatCurrency = (amount: number, currency: string) => {
@@ -40,18 +42,25 @@ export default function History() {
 
   const queryParams = new URLSearchParams(location.search);
   const [localCategory, setLocalCategory] = useState(queryParams.get('category') || '');
+  const [selectedTag, setSelectedTag] = useState(queryParams.get('tag') || '');
   const typeParam = queryParams.get('type');
   const currencyParam = queryParams.get('currency');
   const addToExpensesParam = queryParams.get('addToExpenses');
   const poolParam = queryParams.get('pool');
-  const hasFilterParams = Boolean(typeParam || currencyParam || addToExpensesParam || localCategory || poolParam);
+  const hasFilterParams = Boolean(typeParam || currencyParam || addToExpensesParam || localCategory || poolParam || selectedTag);
 
   const [selectedType, setSelectedType] = useState<string>(typeParam || 'all');
   const [startDate, setStartDate] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
   const [endDate, setEndDate] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
   const [searchTerm, setSearchTerm] = useState('');
   const [exportOpen, setExportOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
+
+  // Extract all unique tags across transactions
+  const allTags = Array.from(
+    new Set(transactions.flatMap(t => t.tags || []))
+  );
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -91,13 +100,16 @@ export default function History() {
 
     if (localCategory && t.categoryId !== localCategory) return false;
 
+    if (selectedTag && (!t.tags || !t.tags.includes(selectedTag))) return false;
+
     if (searchTerm) {
       const cat = categories.find(c => c.id === t.categoryId);
       const catName = t.type === 'transfer' ? 'перевод' : (cat?.name.toLowerCase() || '');
-      const searchLower = searchTerm.toLowerCase();
+      const searchLower = searchTerm.toLowerCase().replace(/^#+/, '');
       const matchName = catName.includes(searchLower);
       const matchNote = t.note?.toLowerCase().includes(searchLower);
-      if (!matchName && !matchNote) return false;
+      const matchTag = t.tags?.some(tg => tg.toLowerCase().includes(searchLower));
+      if (!matchName && !matchNote && !matchTag) return false;
     }
     
     if (poolParam === 'true') {
@@ -151,23 +163,39 @@ export default function History() {
           <h2>История операций</h2>
         </div>
 
-        {/* Export button */}
-        <div ref={exportRef} style={{ position: 'relative' }}>
+        {/* Import & Export buttons */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <button
-            id="export-btn"
-            onClick={() => setExportOpen(o => !o)}
+            id="import-btn"
+            onClick={() => setImportOpen(true)}
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               width: '38px', height: '38px', borderRadius: 'var(--radius-md)',
-              background: 'var(--accent-primary)', color: '#fff',
-              cursor: 'pointer', border: 'none', outline: 'none',
-              boxShadow: '0 2px 8px rgba(79,70,229,0.25)',
-              transition: 'opacity 0.2s',
+              background: 'var(--bg-secondary)', color: 'var(--text-primary)',
+              border: '1px solid var(--border-color)', cursor: 'pointer',
             }}
-            aria-label="Экспорт данных"
+            title="Импорт из CSV / Excel"
+            aria-label="Импорт данных"
           >
-            <Download size={18} />
+            <Upload size={18} />
           </button>
+
+          <div ref={exportRef} style={{ position: 'relative' }}>
+            <button
+              id="export-btn"
+              onClick={() => setExportOpen(o => !o)}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                width: '38px', height: '38px', borderRadius: 'var(--radius-md)',
+                background: 'var(--accent-primary)', color: '#fff',
+                cursor: 'pointer', border: 'none', outline: 'none',
+                boxShadow: '0 2px 8px rgba(79,70,229,0.25)',
+                transition: 'opacity 0.2s',
+              }}
+              aria-label="Экспорт данных"
+            >
+              <Download size={18} />
+            </button>
 
           {exportOpen && (
             <div className="export-dropdown">
@@ -185,6 +213,7 @@ export default function History() {
               </button>
             </div>
           )}
+          </div>
         </div>
       </div>
 
@@ -317,20 +346,52 @@ export default function History() {
               />
             </div>
           </div>
+          {allTags.length > 0 && (
+            <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '2px', alignItems: 'center' }}>
+              <span className="text-muted" style={{ fontSize: '12px', flexShrink: 0 }}>Теги:</span>
+              {allTags.map(tg => {
+                const active = selectedTag === tg;
+                return (
+                  <button
+                    key={tg}
+                    type="button"
+                    onClick={() => setSelectedTag(active ? '' : tg)}
+                    style={{
+                      fontSize: '12px', padding: '4px 10px', borderRadius: '999px', flexShrink: 0,
+                      background: active ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
+                      color: active ? '#fff' : 'var(--text-muted)',
+                      border: `1px solid ${active ? 'var(--accent-primary)' : 'var(--border-color)'}`,
+                      fontWeight: active ? 600 : 400, cursor: 'pointer'
+                    }}
+                  >
+                    #{tg}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
-        {(startDate || endDate || localCategory || selectedType !== 'all') && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            {localCategory ? (
-              <div style={{ fontSize: '13px', color: 'var(--text-secondary)', background: 'var(--bg-secondary)', padding: '4px 8px', borderRadius: '4px' }}>
-                Категория: {categories.find(c => c.id === localCategory)?.name || 'Неизвестно'}
-              </div>
-            ) : <div />}
+        {(startDate || endDate || localCategory || selectedTag || selectedType !== 'all') && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              {localCategory && (
+                <div style={{ fontSize: '13px', color: 'var(--text-secondary)', background: 'var(--bg-secondary)', padding: '4px 8px', borderRadius: '4px' }}>
+                  Категория: {categories.find(c => c.id === localCategory)?.name || 'Неизвестно'}
+                </div>
+              )}
+              {selectedTag && (
+                <div style={{ fontSize: '13px', color: 'var(--accent-primary)', background: 'var(--bg-secondary)', padding: '4px 8px', borderRadius: '4px', fontWeight: 500 }}>
+                  Тег: #{selectedTag}
+                </div>
+              )}
+            </div>
             <button
               onClick={() => { 
                 setStartDate(''); 
                 setEndDate(''); 
                 setSearchTerm(''); 
                 setLocalCategory(''); 
+                setSelectedTag('');
                 setSelectedType('all');
                 navigate('/history'); 
               }}
@@ -396,14 +457,36 @@ export default function History() {
                         <div style={{
                           width: '40px', height: '40px', borderRadius: 'var(--radius-md)',
                           background: `${color}20`, color: color,
-                          display: 'flex', justifyContent: 'center', alignItems: 'center', marginRight: '16px'
+                          display: 'flex', justifyContent: 'center', alignItems: 'center', marginRight: '16px', flexShrink: 0
                         }}>
                           <IconComp size={20} />
                         </div>
-                        <div style={{ flex: 1 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
                           <h4 style={{ fontSize: '16px', fontWeight: 500, marginBottom: '2px' }}>{name}</h4>
                           {t.note && (
                             <p className="text-muted" style={{ fontSize: '13px' }}>{t.note}</p>
+                          )}
+                          {t.tags && t.tags.length > 0 && (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px' }}>
+                              {t.tags.map(tg => (
+                                <span
+                                  key={tg}
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setSelectedTag(selectedTag === tg ? '' : tg);
+                                  }}
+                                  style={{
+                                    fontSize: '11px', padding: '1px 6px', borderRadius: '8px',
+                                    background: selectedTag === tg ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
+                                    color: selectedTag === tg ? '#fff' : 'var(--accent-primary)',
+                                    fontWeight: 500
+                                  }}
+                                >
+                                  #{tg}
+                                </span>
+                              ))}
+                            </div>
                           )}
                         </div>
                         <div style={{ textAlign: 'right', display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -444,6 +527,11 @@ export default function History() {
             );
           })}
         </div>
+      )}
+      {importOpen && (
+        <Suspense fallback={null}>
+          <ImportModal isOpen={importOpen} onClose={() => setImportOpen(false)} />
+        </Suspense>
       )}
     </div>
   );

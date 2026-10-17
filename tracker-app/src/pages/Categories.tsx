@@ -22,6 +22,13 @@ export default function Categories() {
   const [color, setColor] = useState(COLORS[0]);
   const [iconName, setIconName] = useState('HelpCircle');
   const [excludeFromStats, setExcludeFromStats] = useState(false);
+  const [monthlyBudget, setMonthlyBudget] = useState('');
+
+  const formatSpacedNumber = (val: string) => {
+    if (!val) return '';
+    const digits = val.replace(/\D/g, '');
+    return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  };
 
   const openAdd = () => {
     setEditingId(null);
@@ -29,6 +36,7 @@ export default function Categories() {
     setColor(COLORS[0]);
     setIconName('HelpCircle');
     setExcludeFromStats(false);
+    setMonthlyBudget('');
     setIsModalOpen(true);
   };
 
@@ -38,16 +46,33 @@ export default function Categories() {
     setColor(c.color);
     setIconName(c.iconName);
     setExcludeFromStats(c.excludeFromStats || false);
+    setMonthlyBudget(c.monthlyBudgetUZS ? String(c.monthlyBudgetUZS) : '');
     setIsModalOpen(true);
   };
 
   const handleSave = async () => {
     if (!name.trim()) return;
+    const parsedBudget = Number(monthlyBudget.replace(/\s/g, ''));
+    const budgetValue = activeTab === 'expense' && !isNaN(parsedBudget) && parsedBudget > 0 ? parsedBudget : 0;
     
     if (editingId) {
-      await updateCategory(editingId, { name, color, iconName, type: activeTab, excludeFromStats });
+      await updateCategory(editingId, {
+        name,
+        color,
+        iconName,
+        type: activeTab,
+        excludeFromStats,
+        monthlyBudgetUZS: budgetValue,
+      });
     } else {
-      await addCategory({ name, color, iconName, type: activeTab, excludeFromStats });
+      await addCategory({
+        name,
+        color,
+        iconName,
+        type: activeTab,
+        excludeFromStats,
+        ...(budgetValue > 0 ? { monthlyBudgetUZS: budgetValue } : {}),
+      });
     }
     setIsModalOpen(false);
   };
@@ -92,10 +117,17 @@ export default function Categories() {
           const Icon = getIcon(c.iconName);
           return (
             <div key={c.id} className="glass-panel" style={{ padding: '16px', display: 'flex', alignItems: 'center', gap: '16px' }}>
-              <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: `${c.color}20`, color: c.color, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: `${c.color}20`, color: c.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <Icon size={24} />
               </div>
-              <span style={{ flex: 1, fontSize: '16px', fontWeight: 500 }}>{c.name}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: '16px', fontWeight: 500 }}>{c.name}</div>
+                {c.monthlyBudgetUZS && c.monthlyBudgetUZS > 0 ? (
+                  <div style={{ fontSize: '12px', color: 'var(--accent-primary)', marginTop: '2px', fontWeight: 500 }}>
+                    Лимит: {new Intl.NumberFormat('ru-RU').format(c.monthlyBudgetUZS)} UZS / мес
+                  </div>
+                ) : null}
+              </div>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button onClick={() => openEdit(c)} style={{ padding: '8px', color: 'var(--text-muted)' }}>
                   <Edit2 size={18} />
@@ -135,8 +167,24 @@ export default function Categories() {
               placeholder="Название категории" 
               value={name}
               onChange={e => setName(e.target.value)}
-              style={{ width: '100%', padding: '16px', borderRadius: 'var(--radius-md)', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', marginBottom: '16px', fontSize: '16px' }}
+              style={{ width: '100%', padding: '16px', borderRadius: 'var(--radius-md)', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', marginBottom: '12px', fontSize: '16px' }}
             />
+
+            {activeTab === 'expense' && (
+              <div style={{ marginBottom: '16px' }}>
+                <label className="text-muted" style={{ display: 'block', fontSize: '13px', marginBottom: '6px' }}>
+                  Месячный лимит в UZS (необязательно)
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="Например: 2 000 000"
+                  value={formatSpacedNumber(monthlyBudget)}
+                  onChange={e => setMonthlyBudget(e.target.value.replace(/\D/g, ''))}
+                  style={{ width: '100%', padding: '14px 16px', borderRadius: 'var(--radius-md)', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', fontSize: '15px' }}
+                />
+              </div>
+            )}
 
             <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px', cursor: 'pointer' }}>
               <input 

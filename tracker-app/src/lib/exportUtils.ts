@@ -1,6 +1,3 @@
-import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import { Transaction, Category, Account } from '../types';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -34,6 +31,8 @@ function buildRows(
       const timeStr = format(dateObj, 'HH:mm', { locale: ru });
       const sign = t.type === 'income' ? '+' : (t.type === 'transfer' ? '' : '-');
 
+      const tagsStr = t.tags && t.tags.length > 0 ? t.tags.map(tag => `#${tag}`).join(' ') : '';
+
       return {
         Дата: dateStr,
         Время: timeStr,
@@ -44,6 +43,7 @@ function buildRows(
         Валюта: t.currency,
         'Курс (если USD)': t.exchangeRate ? String(t.exchangeRate) : '',
         Заметка: t.note || '',
+        Теги: tagsStr,
       };
     });
 }
@@ -75,8 +75,8 @@ export function exportToCSV(
   downloadBlob(blob, `${filename}.csv`);
 }
 
-// ── XLSX ──────────────────────────────────────────────────────────────────────
-export function exportToXLSX(
+// ── XLSX (lazy-loaded on demand) ──────────────────────────────────────────────
+export async function exportToXLSX(
   transactions: Transaction[],
   categories: Category[],
   accounts: Account[],
@@ -85,6 +85,7 @@ export function exportToXLSX(
   const rows = buildRows(transactions, categories, accounts);
   if (rows.length === 0) return;
 
+  const XLSX = await import('xlsx');
   const ws = XLSX.utils.json_to_sheet(rows);
 
   // Column widths
@@ -105,8 +106,8 @@ export function exportToXLSX(
   XLSX.writeFile(wb, `${filename}.xlsx`);
 }
 
-// ── PDF ───────────────────────────────────────────────────────────────────────
-export function exportToPDF(
+// ── PDF (lazy-loaded on demand) ───────────────────────────────────────────────
+export async function exportToPDF(
   transactions: Transaction[],
   categories: Category[],
   accounts: Account[],
@@ -115,6 +116,11 @@ export function exportToPDF(
 ) {
   const rows = buildRows(transactions, categories, accounts);
   if (rows.length === 0) return;
+
+  const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+    import('jspdf'),
+    import('jspdf-autotable'),
+  ]);
 
   const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
 

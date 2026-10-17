@@ -9,6 +9,7 @@ export interface Category {
   color: string;
   userId?: string;
   excludeFromStats?: boolean;
+  monthlyBudgetUZS?: number; // Месячный лимит по категории (в UZS)
 }
 
 export interface Account {
@@ -45,5 +46,65 @@ export interface Transaction {
   type: TransactionType;
   excludeFromStats?: boolean;
   note?: string;
+  tags?: string[]; // Хэштеги для гибкой группировки (#отпуск, #ремонт и т.д.)
   userId?: string;
 }
+
+export interface QuickTemplate {
+  id: string;
+  name: string;
+  type: TransactionType;
+  amount: number;
+  currency: Currency;
+  categoryId: string;
+  accountId?: string;
+  note?: string;
+  tags?: string[];
+}
+
+export interface Goal {
+  id: string;
+  name: string;
+  targetAmount: number;
+  currentAmount: number;
+  currency: Currency;
+  color: string;
+  iconName: string;
+  deadline?: string; // ISO date string
+  note?: string;
+  userId?: string;
+}
+
+export type DebtType = 'lent' | 'borrowed'; // lent = Мне должны, borrowed = Я должен
+
+export interface Debt {
+  id: string;
+  personName: string;
+  type: DebtType;
+  totalAmount: number;
+  paidAmount: number;
+  currency: Currency;
+  dueDate?: string; // ISO date string
+  note?: string;
+  isSettled?: boolean;
+  createdAt: string;
+  userId?: string;
+}
+
+export type RecurrenceInterval = 'weekly' | 'monthly' | 'yearly';
+
+export interface Subscription {
+  id: string;
+  name: string;
+  amount: number;
+  currency: Currency;
+  type: 'expense' | 'income';
+  categoryId: string;
+  accountId: string;
+  interval: RecurrenceInterval;
+  nextDueDate: string; // ISO date string
+  isActive: boolean;
+  note?: string;
+  userId?: string;
+}
+
