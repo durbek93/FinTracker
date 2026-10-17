@@ -424,10 +424,6 @@ const BottomNav = () => {
         <ListIcon size={22} strokeWidth={isActive('/history') ? 2.5 : 2} />
         <span>История</span>
       </Link>
-      <Link to="/planning" className={`nav-item ${isActive('/planning') ? 'active' : ''}`}>
-        <Target size={22} strokeWidth={isActive('/planning') ? 2.5 : 2} />
-        <span>Планы</span>
-      </Link>
       
       <div className="nav-item-fab-container">
         <Link to="/add" className="fab">
