@@ -5,7 +5,7 @@ import { User, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { DEFAULT_CATEGORIES } from './categories';
 
 const getAuthTelegramUrl = () => {
-  const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID;
+  const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || 'myfinancetracker-9eb06';
   if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
     return `http://localhost:5001/${projectId}/us-central1/authTelegram`;
   }

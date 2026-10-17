@@ -20,12 +20,12 @@ import {
 import { getAuth } from 'firebase/auth';
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyASeO3yD_ojaGl6Acl9jxDD6aqYvg3tEic",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "myfinancetracker-9eb06.firebaseapp.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "myfinancetracker-9eb06",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "myfinancetracker-9eb06.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "32464591720",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:32464591720:web:e9082c4ab9ca3157bbd4dd"
 };
 
 // Initialize Firebase with persistent offline cache (IndexedDB + multi-tab)
