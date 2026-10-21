@@ -104,7 +104,10 @@ export const aggregateUnifiedDebts = (
   // 1. Clone explicit Firestore debts into map
   const debtsMap = new Map<string, Debt>();
   for (const d of dbDebts) {
-    debtsMap.set(d.id, { ...d });
+    debtsMap.set(d.id, {
+      ...d,
+      linkedTransactionIds: d.linkedTransactionIds ? [...d.linkedTransactionIds] : [],
+    });
   }
 
   // 2. Identify debt-related transactions
@@ -206,6 +209,7 @@ export const aggregateUnifiedDebts = (
       isSettled: false,
       isAutoParsed: true,
       sourceTransactionId: group.sourceTxIds[0],
+      linkedTransactionIds: [...group.sourceTxIds],
     };
     debtsMap.set(autoId, autoDebt);
     dbDebtsByKey.set(key, autoDebt);
@@ -219,6 +223,7 @@ export const aggregateUnifiedDebts = (
     if (item.tx.debtId && debtsMap.has(item.tx.debtId)) {
       const targetDebt = debtsMap.get(item.tx.debtId)!;
       targetDebt.paidAmount += item.tx.amount;
+      targetDebt.linkedTransactionIds = [...(targetDebt.linkedTransactionIds || []), item.tx.id];
       continue;
     }
 
@@ -227,18 +232,23 @@ export const aggregateUnifiedDebts = (
     const targetDebt = dbDebtsByKey.get(key);
     if (targetDebt) {
       targetDebt.paidAmount += item.tx.amount;
+      targetDebt.linkedTransactionIds = [...(targetDebt.linkedTransactionIds || []), item.tx.id];
     }
   }
 
   // 4. Finalize isSettled status for all debts
+  // Cutoff rule: All debts originating prior to 14 October 2026 are marked as settled/closed
+  const OCT_14_2026 = new Date('2026-10-14T00:00:00');
+
   const result: Debt[] = [];
   for (const d of debtsMap.values()) {
-    const paid = d.paidAmount || 0;
-    const isSettled = paid >= d.totalAmount;
+    const isBeforeOct14 = d.createdAt ? new Date(d.createdAt) < OCT_14_2026 : false;
+    const paid = isBeforeOct14 ? d.totalAmount : (d.paidAmount || 0);
+    const isSettled = isBeforeOct14 ? true : (d.isSettled ?? (paid >= d.totalAmount));
     result.push({
       ...d,
       paidAmount: paid,
-      isSettled: d.isSettled ?? isSettled,
+      isSettled,
     });
   }
 

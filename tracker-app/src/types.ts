@@ -92,6 +92,7 @@ export interface Debt {
   userId?: string;
   isAutoParsed?: boolean;
   sourceTransactionId?: string;
+  linkedTransactionIds?: string[];
 }
 
 export type RecurrenceInterval = 'weekly' | 'monthly' | 'yearly';

@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import {
   Target,
   HandCoins,
@@ -15,6 +15,7 @@ import {
   Calendar,
   Wallet,
   Sparkles,
+  ChevronRight,
 } from 'lucide-react';
 import { useStore } from '../store';
 import { Currency, Debt, DebtType, Goal, RecurrenceInterval, Subscription } from '../types';
@@ -77,6 +78,7 @@ export default function Planning() {
     deleteSubscription,
     accounts,
     categories,
+    transactions,
     addTransaction,
   } = useStore();
 
@@ -122,6 +124,7 @@ export default function Planning() {
   const [repayAmount, setRepayAmount] = useState('');
   const [repaySyncAccount, setRepaySyncAccount] = useState(true);
   const [repayAccountId, setRepayAccountId] = useState('');
+  const [selectedDebtForDetails, setSelectedDebtForDetails] = useState<Debt | null>(null);
 
   // ─── SUBSCRIPTION STATES ───
   const [isSubModalOpen, setIsSubModalOpen] = useState(false);
@@ -790,12 +793,15 @@ export default function Planning() {
                 <div
                   key={d.id}
                   className="glass-panel"
+                  onClick={() => setSelectedDebtForDetails(d)}
                   style={{
                     padding: '16px',
                     display: 'flex',
                     flexDirection: 'column',
                     gap: '10px',
                     opacity: d.isSettled ? 0.65 : 1,
+                    cursor: 'pointer',
+                    transition: 'transform 0.15s ease, border-color 0.15s ease',
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -822,15 +828,23 @@ export default function Planning() {
                           <span style={{ fontSize: '11px', color: 'var(--success)', fontWeight: 600 }}>✓ Погашено</span>
                         )}
                       </div>
-                      <h4 style={{ fontSize: '17px', fontWeight: 700, marginTop: '6px' }}>{d.personName}</h4>
-                      {d.note && <p className="text-muted" style={{ fontSize: '12px', marginTop: '2px' }}>{d.note}</p>}
+                      <h4 style={{ fontSize: '17px', fontWeight: 700, marginTop: '6px', marginBottom: '2px' }}>{d.personName}</h4>
+                      {d.createdAt && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                          <Calendar size={13} style={{ color: 'var(--accent-primary)', flexShrink: 0 }} />
+                          <span>Взят: {format(new Date(d.createdAt), 'd MMMM yyyy, HH:mm', { locale: ru })}</span>
+                        </div>
+                      )}
+                      {d.note && <p className="text-muted" style={{ fontSize: '12px', margin: 0 }}>{d.note}</p>}
                     </div>
 
                     <button
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation();
                         if (confirm(`Удалить запись о долге «${d.personName}»?`)) deleteDebt(d.id);
                       }}
                       style={{ color: 'var(--danger)', padding: '4px' }}
+                      title="Удалить долг"
                     >
                       <Trash2 size={16} />
                     </button>
@@ -875,27 +889,36 @@ export default function Planning() {
                     )}
                   </div>
 
-                  {!d.isSettled && (
-                    <button
-                      type="button"
-                      onClick={() => openRepayModal(d)}
-                      style={{
-                        padding: '10px',
-                        borderRadius: 'var(--radius-sm)',
-                        background: 'var(--accent-primary)',
-                        color: 'white',
-                        fontWeight: 600,
-                        fontSize: '13px',
-                        display: 'flex',
-                        justifyContent: 'center',
-                        alignItems: 'center',
-                        gap: '6px',
-                      }}
-                    >
-                      <Check size={16} />
-                      <span>{isLent ? 'Получить возврат' : 'Внести платёж'}</span>
-                    </button>
-                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginTop: '2px' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--accent-primary)', display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+                      Подробнее о транзакции <ChevronRight size={13} />
+                    </span>
+                    {!d.isSettled && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openRepayModal(d);
+                        }}
+                        style={{
+                          padding: '6px 14px',
+                          borderRadius: 'var(--radius-sm)',
+                          background: 'var(--accent-primary)',
+                          color: 'white',
+                          fontWeight: 600,
+                          fontSize: '12px',
+                          display: 'flex',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          gap: '4px',
+                          marginLeft: 'auto',
+                        }}
+                      >
+                        <Check size={14} />
+                        <span>{isLent ? 'Возврат' : 'Платёж'}</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })
@@ -1533,6 +1556,258 @@ export default function Planning() {
               Подтвердить погашение
             </button>
           </form>
+        </div>
+      )}
+
+      {/* ─── MODAL: DEBT DETAILS & CONNECTED TRANSACTIONS ─── */}
+      {selectedDebtForDetails && (
+        <div
+          onClick={() => setSelectedDebtForDetails(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.6)',
+            zIndex: 9999,
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            padding: '16px',
+            backdropFilter: 'blur(4px)',
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="glass-panel animate-scale-in"
+            style={{
+              width: '100%',
+              maxWidth: '460px',
+              padding: '24px',
+              background: 'var(--bg-primary)',
+              borderRadius: 'var(--radius-lg)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span
+                    style={{
+                      fontSize: '12px',
+                      padding: '2px 8px',
+                      borderRadius: '10px',
+                      fontWeight: 600,
+                      background: selectedDebtForDetails.type === 'lent' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                      color: selectedDebtForDetails.type === 'lent' ? 'var(--success)' : 'var(--danger)',
+                    }}
+                  >
+                    {selectedDebtForDetails.type === 'lent' ? 'Мне должны' : 'Я должен'}
+                  </span>
+                  {selectedDebtForDetails.isSettled ? (
+                    <span style={{ fontSize: '12px', color: 'var(--success)', fontWeight: 600 }}>✓ Закрыт / Погашен</span>
+                  ) : (
+                    <span style={{ fontSize: '12px', color: '#f59e0b', fontWeight: 600 }}>• Активен</span>
+                  )}
+                </div>
+                <h3 style={{ fontSize: '20px', fontWeight: 700, margin: '6px 0 2px' }}>
+                  {selectedDebtForDetails.personName}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedDebtForDetails(null)}
+                style={{ color: 'var(--text-muted)', padding: '4px' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Financial Overview Card */}
+            <div
+              style={{
+                background: 'var(--bg-secondary)',
+                padding: '14px',
+                borderRadius: 'var(--radius-md)',
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: '12px',
+                border: '1px solid var(--border-color)',
+              }}
+            >
+              <div>
+                <p className="text-muted" style={{ fontSize: '12px', margin: 0 }}>Сумма займа</p>
+                <p style={{ fontSize: '16px', fontWeight: 700, margin: '2px 0 0' }}>
+                  {formatCurrency(selectedDebtForDetails.totalAmount, selectedDebtForDetails.currency)}
+                </p>
+              </div>
+              <div>
+                <p className="text-muted" style={{ fontSize: '12px', margin: 0 }}>Остаток к возврату</p>
+                <p
+                  style={{
+                    fontSize: '16px',
+                    fontWeight: 700,
+                    margin: '2px 0 0',
+                    color: selectedDebtForDetails.isSettled ? 'var(--success)' : (selectedDebtForDetails.type === 'lent' ? 'var(--text-primary)' : 'var(--danger)'),
+                  }}
+                >
+                  {formatCurrency(Math.max(0, selectedDebtForDetails.totalAmount - selectedDebtForDetails.paidAmount), selectedDebtForDetails.currency)}
+                </p>
+              </div>
+              <div>
+                <p className="text-muted" style={{ fontSize: '12px', margin: 0 }}>Дата взятия</p>
+                <p style={{ fontSize: '13px', fontWeight: 600, margin: '2px 0 0' }}>
+                  {selectedDebtForDetails.createdAt ? format(new Date(selectedDebtForDetails.createdAt), 'd MMMM yyyy, HH:mm', { locale: ru }) : '—'}
+                </p>
+              </div>
+              <div>
+                <p className="text-muted" style={{ fontSize: '12px', margin: 0 }}>Срок возврата</p>
+                <p style={{ fontSize: '13px', fontWeight: 600, margin: '2px 0 0' }}>
+                  {selectedDebtForDetails.dueDate ? format(new Date(selectedDebtForDetails.dueDate), 'd MMMM yyyy', { locale: ru }) : 'Не установлен'}
+                </p>
+              </div>
+            </div>
+
+            {selectedDebtForDetails.note && (
+              <div>
+                <span className="text-muted" style={{ fontSize: '12px' }}>Заметка к долгу:</span>
+                <p style={{ fontSize: '14px', margin: '4px 0 0', background: 'var(--bg-secondary)', padding: '10px', borderRadius: 'var(--radius-sm)' }}>
+                  {selectedDebtForDetails.note}
+                </p>
+              </div>
+            )}
+
+            {/* Connected Transactions List */}
+            <div>
+              <h4 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '8px' }}>
+                Связанные транзакции
+              </h4>
+              {(() => {
+                const connectedTxs = transactions.filter(t =>
+                  t.id === selectedDebtForDetails.sourceTransactionId ||
+                  selectedDebtForDetails.linkedTransactionIds?.includes(t.id) ||
+                  t.debtId === selectedDebtForDetails.id
+                );
+
+                if (connectedTxs.length === 0) {
+                  return (
+                    <p className="text-muted" style={{ fontSize: '13px', margin: 0 }}>
+                      Прямая транзакция не привязана (создано вручную)
+                    </p>
+                  );
+                }
+
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {connectedTxs.map(tx => {
+                      const acc = accounts.find(a => a.id === tx.accountId);
+                      const cat = categories.find(c => c.id === tx.categoryId);
+                      const isIncome = tx.type === 'income';
+
+                      return (
+                        <div
+                          key={tx.id}
+                          style={{
+                            background: 'var(--bg-secondary)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: 'var(--radius-sm)',
+                            padding: '12px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '6px',
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                                {format(new Date(tx.date), 'd MMMM yyyy, HH:mm', { locale: ru })}
+                              </span>
+                              <div style={{ fontSize: '13px', fontWeight: 600, marginTop: '2px' }}>
+                                {cat?.name || 'Операция'} {acc && `• ${acc.name}`}
+                              </div>
+                            </div>
+                            <span
+                              style={{
+                                fontSize: '15px',
+                                fontWeight: 700,
+                                color: isIncome ? 'var(--success)' : 'var(--text-primary)',
+                              }}
+                            >
+                              {isIncome ? '+' : '-'}{formatCurrency(tx.amount, tx.currency)}
+                            </span>
+                          </div>
+
+                          {tx.note && (
+                            <p className="text-muted" style={{ fontSize: '12px', margin: 0 }}>
+                              {tx.note}
+                            </p>
+                          )}
+
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
+                            <Link
+                              to={`/edit/${tx.id}`}
+                              style={{
+                                fontSize: '12px',
+                                color: 'var(--accent-primary)',
+                                textDecoration: 'none',
+                                fontWeight: 600,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                              }}
+                            >
+                              Редактировать операцию →
+                            </Link>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Action buttons */}
+            <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
+              {!selectedDebtForDetails.isSettled && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const d = selectedDebtForDetails;
+                    setSelectedDebtForDetails(null);
+                    openRepayModal(d);
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: '12px',
+                    borderRadius: 'var(--radius-md)',
+                    background: 'var(--accent-primary)',
+                    color: 'white',
+                    fontWeight: 600,
+                    fontSize: '14px',
+                  }}
+                >
+                  {selectedDebtForDetails.type === 'lent' ? 'Зафиксировать возврат' : 'Внести платёж'}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setSelectedDebtForDetails(null)}
+                style={{
+                  padding: '12px 18px',
+                  borderRadius: 'var(--radius-md)',
+                  background: 'var(--bg-tertiary)',
+                  color: 'var(--text-primary)',
+                  fontWeight: 600,
+                  fontSize: '14px',
+                }}
+              >
+                Закрыть
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
