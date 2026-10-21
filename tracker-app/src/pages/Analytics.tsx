@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import { getIcon } from '../lib/icons';
-import { PieChart, BarChart2, TrendingDown, TrendingUp, Calendar, Brain, Sparkles, Loader2, ChevronDown, ChevronUp, Download, Wallet, Flame } from 'lucide-react';
+import { PieChart, BarChart2, TrendingDown, TrendingUp, Calendar, Brain, Sparkles, Loader2, ChevronDown, ChevronUp, Download, Wallet, Flame, Eye, EyeOff, X } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, startOfDay, endOfDay, isValid, differenceInCalendarDays, subDays, eachDayOfInterval, getDaysInMonth } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { getFinancialAdvice, AnalystReport, hasGeminiKey } from '../lib/gemini';
@@ -142,6 +142,33 @@ export default function Analytics() {
   const [selectedTag, setSelectedTag] = useState<string>('');
   const [isFilterOpen, setIsFilterOpen] = useState(false);
 
+  // Hidden categories for temporary or persistent exclusion from analytics
+  const [hiddenCategoryIds, setHiddenCategoryIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('analytics_hidden_categories');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const toggleHideCategory = (catId: string) => {
+    setHiddenCategoryIds(prev => {
+      const next = prev.includes(catId) ? prev.filter(id => id !== catId) : [...prev, catId];
+      try {
+        localStorage.setItem('analytics_hidden_categories', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const resetHiddenCategories = () => {
+    setHiddenCategoryIds([]);
+    try {
+      localStorage.removeItem('analytics_hidden_categories');
+    } catch {}
+  };
+
   // Extract all unique tags
   const allTags = useMemo(
     () => Array.from(new Set(storeTransactions.flatMap(t => t.tags || []))),
@@ -164,11 +191,12 @@ export default function Analytics() {
     }
   };
 
-  // Filter out excluded and apply date range + tag filter
+  // Filter out excluded and apply date range + tag filter + hiddenCategoryIds
   const transactions = storeTransactions.filter(t => {
     if (t.excludeFromStats) return false;
     const cat = categories.find(c => c.id === t.categoryId);
     if (cat?.excludeFromStats) return false;
+    if (t.categoryId && hiddenCategoryIds.includes(t.categoryId)) return false;
     if (selectedTag && (!t.tags || !t.tags.includes(selectedTag))) return false;
 
     const tDate = new Date(t.date);
@@ -204,6 +232,7 @@ export default function Analytics() {
       if (t.excludeFromStats) continue;
       const cat = categories.find(c => c.id === t.categoryId);
       if (cat?.excludeFromStats) continue;
+      if (t.categoryId && hiddenCategoryIds.includes(t.categoryId)) continue;
       if (selectedTag && (!t.tags || !t.tags.includes(selectedTag))) continue;
 
       const d = new Date(t.date);
@@ -223,11 +252,51 @@ export default function Analytics() {
     }
 
     return { prevExpenseTotal, prevIncomeTotal, prevByCategory };
-  }, [storeTransactions, categories, startDate, endDate, selectedTag]);
+  }, [storeTransactions, categories, startDate, endDate, selectedTag, hiddenCategoryIds]);
 
   const [type, setType] = useState<'expense' | 'income'>('expense');
   const [chartMode, setChartMode] = useState<'donut' | 'bar'>('donut');
   const [isExpensesExpanded, setIsExpensesExpanded] = useState(false);
+
+  // ── Calculate totals for hidden categories in current period (for display/unhide) ──
+  const hiddenCategoriesData = useMemo(() => {
+    if (hiddenCategoryIds.length === 0) return [];
+
+    const hiddenTxs = storeTransactions.filter(t => {
+      if (t.excludeFromStats) return false;
+      if (!t.categoryId || !hiddenCategoryIds.includes(t.categoryId)) return false;
+      if (t.type !== type) return false;
+
+      const tDate = new Date(t.date);
+      if (startDate) {
+        const sDate = new Date(startDate);
+        if (isValid(sDate) && tDate < startOfDay(sDate)) return false;
+      }
+      if (endDate) {
+        const eDate = new Date(endDate);
+        if (isValid(eDate) && tDate > endOfDay(eDate)) return false;
+      }
+      return true;
+    });
+
+    const totals: Record<string, number> = {};
+    for (const t of hiddenTxs) {
+      const amtUZS = t.currency === 'UZS'
+        ? t.amount
+        : (t.convertedAmount ?? (t.exchangeRate ? t.amount * t.exchangeRate : 0));
+      totals[t.categoryId] = (totals[t.categoryId] || 0) + amtUZS;
+    }
+
+    return hiddenCategoryIds
+      .map(id => {
+        const cat = categories.find(c => c.id === id);
+        return {
+          category: cat,
+          amount: totals[id] || 0,
+        };
+      })
+      .filter(item => Boolean(item.category));
+  }, [storeTransactions, categories, hiddenCategoryIds, type, startDate, endDate]);
 
   // ── Expense calculations ─────────────────────────────────────────────────
   const expenseTxs = transactions.filter(t => t.type === 'expense');
@@ -695,6 +764,76 @@ ${aiReport.advice.map(a => '• ' + a).join('\n')}
         )}
       </div>
 
+      {/* ── Hidden Categories Active Banner ── */}
+      {hiddenCategoryIds.length > 0 && (
+        <div
+          className="glass-panel"
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            background: 'rgba(59, 130, 246, 0.08)',
+            border: '1px solid rgba(59, 130, 246, 0.25)',
+            padding: '10px 14px',
+            marginBottom: '16px',
+            fontSize: '13px',
+            flexWrap: 'wrap',
+            gap: '8px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <EyeOff size={16} style={{ color: 'var(--accent-primary)', flexShrink: 0 }} />
+            <span style={{ fontWeight: 500 }}>
+              Исключено из расчёта:
+            </span>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+              {hiddenCategoryIds.map(id => {
+                const cat = categories.find(c => c.id === id);
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => toggleHideCategory(id)}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      fontSize: '12px',
+                      padding: '2px 8px',
+                      borderRadius: '10px',
+                      background: 'var(--bg-primary)',
+                      border: '1px solid var(--border-color)',
+                      color: 'var(--text-primary)',
+                      cursor: 'pointer',
+                      fontWeight: 500,
+                    }}
+                    title="Нажмите, чтобы вернуть в расчёт"
+                  >
+                    <span>{cat?.name || 'Категория'}</span>
+                    <X size={12} style={{ color: 'var(--text-muted)' }} />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={resetHiddenCategories}
+            style={{
+              fontSize: '12px',
+              color: 'var(--accent-primary)',
+              fontWeight: 600,
+              padding: '4px 8px',
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+            }}
+          >
+            Показать все
+          </button>
+        </div>
+      )}
+
       {/* ── Summary cards depending on tab ── */}
       {type === 'expense' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
@@ -1088,6 +1227,30 @@ ${aiReport.advice.map(a => '• ' + a).join('\n')}
                         <span style={{ fontSize: '12px', fontWeight: 600, padding: '2px 6px', borderRadius: '10px', background: `${color}22`, color, minWidth: '42px', textAlign: 'center' }}>
                           {item.percentage.toFixed(1)}%
                         </span>
+                        {item.category?.id && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleHideCategory(item.category!.id);
+                            }}
+                            title={`Исключить «${item.category.name}» из аналитики`}
+                            style={{
+                              padding: '4px',
+                              color: 'var(--text-muted)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              borderRadius: '6px',
+                              background: 'transparent',
+                              border: 'none',
+                              cursor: 'pointer',
+                              transition: 'color 0.15s ease',
+                            }}
+                          >
+                            <EyeOff size={15} />
+                          </button>
+                        )}
                       </div>
                     </div>
                     <div style={{ width: '100%', height: '6px', background: 'var(--bg-tertiary)', borderRadius: '3px', overflow: 'hidden' }}>
@@ -1109,6 +1272,77 @@ ${aiReport.advice.map(a => '• ' + a).join('\n')}
                 );
               })}
             </div>
+
+            {/* ── Hidden Categories Bottom Panel ── */}
+            {hiddenCategoriesData.length > 0 && (
+              <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px dashed var(--border-color)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                  <span style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <EyeOff size={14} style={{ color: 'var(--accent-primary)' }} />
+                    Исключены из аналитики ({hiddenCategoriesData.length})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={resetHiddenCategories}
+                    style={{ fontSize: '12px', color: 'var(--accent-primary)', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer' }}
+                  >
+                    Вернуть все
+                  </button>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {hiddenCategoriesData.map(({ category, amount }) => {
+                    const IconComp = getIcon(category?.iconName || '');
+                    return (
+                      <div
+                        key={category!.id}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '10px 12px',
+                          borderRadius: 'var(--radius-sm)',
+                          background: 'var(--bg-secondary)',
+                          border: '1px dashed var(--border-color)',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          {IconComp && <IconComp size={16} color={category?.color || '#94a3b8'} />}
+                          <span style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-muted)', textDecoration: 'line-through' }}>
+                            {category?.name}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)' }}>
+                            {formatCurrency(amount, 'UZS')}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => toggleHideCategory(category!.id)}
+                            title={`Вернуть «${category?.name}» в аналитику`}
+                            style={{
+                              padding: '4px 10px',
+                              borderRadius: '6px',
+                              background: 'var(--bg-tertiary)',
+                              color: 'var(--accent-primary)',
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              border: '1px solid var(--border-color)',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <Eye size={13} />
+                            <span>Показать</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
