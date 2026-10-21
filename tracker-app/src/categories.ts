@@ -23,8 +23,12 @@ export const DEFAULT_CATEGORIES: Category[] = [
   { id: 'unknown', name: 'неизвет/рас', iconName: 'HelpCircle', color: '#94a3b8', type: 'expense' },
   { id: 'cashout', name: 'Обналичка', iconName: 'Banknote', color: '#059669', type: 'expense' },
   { id: 'work_expenses', name: 'рабочие расх', iconName: 'Briefcase', color: '#475569', type: 'expense' },
+  { id: 'lent', name: 'Одолжил', iconName: 'HandCoins', color: '#f59e0b', type: 'expense', excludeFromStats: true },
+  { id: 'repaid_by_me', name: 'Вернул долг (я)', iconName: 'CheckCircle', color: '#ef4444', type: 'expense', excludeFromStats: true },
 
   // Доходы
   { id: 'salary', name: 'Зарплата', iconName: 'Banknote', color: '#10b981', type: 'income' },
   { id: 'other_income', name: 'Прочие доходы', iconName: 'TrendingUp', color: '#3b82f6', type: 'income' },
+  { id: 'debt_repaid', name: 'Вернули долг', iconName: 'CheckCircle', color: '#10b981', type: 'income', excludeFromStats: true },
+  { id: 'borrowed', name: 'Долг нужно вернуть', iconName: 'HandCoins', color: '#3b82f6', type: 'income', excludeFromStats: true },
 ];

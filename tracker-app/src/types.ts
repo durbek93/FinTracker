@@ -47,6 +47,7 @@ export interface Transaction {
   excludeFromStats?: boolean;
   note?: string;
   tags?: string[]; // Хэштеги для гибкой группировки (#отпуск, #ремонт и т.д.)
+  debtId?: string; // Связь с записью долга
   userId?: string;
 }
 
@@ -89,6 +90,8 @@ export interface Debt {
   isSettled?: boolean;
   createdAt: string;
   userId?: string;
+  isAutoParsed?: boolean;
+  sourceTransactionId?: string;
 }
 
 export type RecurrenceInterval = 'weekly' | 'monthly' | 'yearly';

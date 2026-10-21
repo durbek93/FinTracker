@@ -7,10 +7,11 @@ import { TransactionType, Currency, Transaction, QuickTemplate } from '../types'
 import { ArrowRightLeft, ArrowLeft, Sparkles, Loader2, Calculator, BookmarkPlus, RefreshCw, Hash, X, Camera, Mic, MicOff } from 'lucide-react';
 import { parseTransactionText, parseReceiptImage, ParsedTransaction, hasGeminiKey } from '../lib/gemini';
 import { fetchCbuUsdRate, getLocalQuickTemplates, loadQuickTemplates, saveQuickTemplates } from '../lib/currencyRate';
+import { getDebtCategoryRole } from '../lib/debtUtils';
 import CalculatorModal from '../components/CalculatorModal';
 
 export default function AddTransaction() {
-  const { addTransaction, updateTransaction, deleteTransaction, accounts, transactions, categories } = useStore();
+  const { addTransaction, updateTransaction, deleteTransaction, accounts, transactions, categories, debts } = useStore();
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   
@@ -122,6 +123,7 @@ export default function AddTransaction() {
 
   const selectedCategory = categories.find(c => c.id === categoryId);
   const isCategoryExcluded = selectedCategory?.excludeFromStats || false;
+  const debtRole = selectedCategory ? getDebtCategoryRole(selectedCategory.name, selectedCategory.type) : null;
 
   const handleAmountChange = (val: string) => {
     const raw = val.replace(/\s/g, '').replace(',', '.');
@@ -298,7 +300,13 @@ export default function AddTransaction() {
     }
 
     if (type !== 'transfer') {
-      payload.excludeFromStats = excludeFromStats;
+      payload.excludeFromStats = debtRole ? true : excludeFromStats;
+      if (debtRole && note.trim()) {
+        const matchingDebt = debts.find(d => d.personName.trim().toLowerCase() === note.trim().toLowerCase());
+        if (matchingDebt) {
+          payload.debtId = matchingDebt.id;
+        }
+      }
     }
 
     // Currency purchase expense tracking
@@ -1093,14 +1101,41 @@ export default function AddTransaction() {
 
         {/* Note */}
         <div>
-          <label className="text-muted" style={{ display: 'block', fontSize: '14px', marginBottom: '8px' }}>Заметка (необязательно)</label>
+          <label className="text-muted" style={{ display: 'block', fontSize: '14px', marginBottom: '8px' }}>
+            {debtRole ? 'Кому / У кого (Имя должника или заёмщика)' : 'Заметка (необязательно)'}
+          </label>
           <input 
             type="text" 
             value={note} 
             onChange={e => setNote(e.target.value)} 
-            placeholder="Описание..." 
+            placeholder={debtRole ? 'Например: Алишер' : 'Описание...'} 
             style={{ display: 'block', width: '100%', boxSizing: 'border-box', maxWidth: '100%' }}
           />
+          {debtRole && debts.some(d => !d.isSettled) && (
+            <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Выбрать открытый долг:</span>
+              {debts
+                .filter(d => !d.isSettled)
+                .map(d => (
+                  <button
+                    key={d.id}
+                    type="button"
+                    onClick={() => setNote(d.personName)}
+                    style={{
+                      fontSize: '11px',
+                      padding: '3px 8px',
+                      borderRadius: '12px',
+                      background: note.trim().toLowerCase() === d.personName.trim().toLowerCase() ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
+                      color: note.trim().toLowerCase() === d.personName.trim().toLowerCase() ? 'white' : 'var(--text-primary)',
+                      border: '1px solid var(--border-color)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {d.personName} ({d.type === 'lent' ? 'мне должен' : 'я должен'})
+                  </button>
+                ))}
+            </div>
+          )}
         </div>
 
         {/* Tags (#теги) */}

@@ -19,6 +19,7 @@ import {
 import { useStore } from '../store';
 import { Currency, Debt, DebtType, Goal, RecurrenceInterval, Subscription } from '../types';
 import { getIcon, AVAILABLE_ICON_NAMES } from '../lib/icons';
+import { findDebtCategory, DebtCategoryRole } from '../lib/debtUtils';
 import { format, addWeeks, addMonths, addYears, differenceInCalendarDays } from 'date-fns';
 import { ru } from 'date-fns/locale';
 
@@ -261,7 +262,9 @@ export default function Planning() {
 
     if (debtCreateSyncAccount && debtAccountId) {
       const txType = debtType === 'lent' ? 'expense' : 'income';
-      const catId = categories.find(c => c.type === txType)?.id || '';
+      const role: DebtCategoryRole = debtType === 'lent' ? 'lent' : 'borrowed';
+      const debtCategory = findDebtCategory(categories, role) || categories.find(c => c.type === txType);
+      const catId = debtCategory?.id || '';
       await addTransaction({
         amount: total,
         currency: debtCurrency,
@@ -304,7 +307,9 @@ export default function Planning() {
     if (repaySyncAccount && repayAccountId) {
       // If someone owed us (lent) and pays back -> income; if we owed (borrowed) and pay back -> expense
       const txType = repayDebt.type === 'lent' ? 'income' : 'expense';
-      const catId = categories.find(c => c.type === txType)?.id || '';
+      const role: DebtCategoryRole = repayDebt.type === 'lent' ? 'debt_repaid' : 'repaid_by_me';
+      const debtCategory = findDebtCategory(categories, role) || categories.find(c => c.type === txType);
+      const catId = debtCategory?.id || '';
       await addTransaction({
         amount: payAmt,
         currency: repayDebt.currency,
@@ -313,6 +318,7 @@ export default function Planning() {
         date: new Date().toISOString(),
         type: txType,
         excludeFromStats: true,
+        debtId: repayDebt.id,
         note: `${repayDebt.type === 'lent' ? 'Возврат долга от' : 'Погашение долга'}: ${repayDebt.personName}`,
         tags: ['долг'],
       });
@@ -807,6 +813,11 @@ export default function Planning() {
                         >
                           {isLent ? 'Мне должны' : 'Я должен'}
                         </span>
+                        {d.isAutoParsed && (
+                          <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '8px', background: 'var(--bg-tertiary)', color: 'var(--text-muted)' }}>
+                            из операций
+                          </span>
+                        )}
                         {d.isSettled && (
                           <span style={{ fontSize: '11px', color: 'var(--success)', fontWeight: 600 }}>✓ Погашено</span>
                         )}

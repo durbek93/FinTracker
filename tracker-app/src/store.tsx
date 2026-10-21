@@ -3,6 +3,7 @@ import { Transaction, Account, Currency, isAccountProtected, Category, Goal, Deb
 import { db, collection, addDoc, onSnapshot, query, deleteDoc, doc, updateDoc, setDoc, where, auth, writeBatch } from './firebase';
 import { User, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { DEFAULT_CATEGORIES } from './categories';
+import { aggregateUnifiedDebts } from './lib/debtUtils';
 
 const getAuthTelegramUrl = () => {
   const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || 'myfinancetracker-9eb06';
@@ -50,7 +51,7 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
   const [dbAccounts, setDbAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
-  const [debts, setDebts] = useState<Debt[]>([]);
+  const [dbDebts, setDbDebts] = useState<Debt[]>([]);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -110,7 +111,7 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
         setDbAccounts([]);
         setCategories([]);
         setGoals([]);
-        setDebts([]);
+        setDbDebts([]);
         setSubscriptions([]);
         setLoading(false);
       }
@@ -231,7 +232,7 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
       const list: Debt[] = [];
       snapshot.forEach(d => list.push({ id: d.id, ...d.data() } as Debt));
       list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-      setDebts(list);
+      setDbDebts(list);
     }, (err) => console.warn("Debts subscription error:", err));
     return () => unsubscribe();
   }, [currentUser]);
@@ -248,6 +249,11 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
     }, (err) => console.warn("Subscriptions error:", err));
     return () => unsubscribe();
   }, [currentUser]);
+
+  // Dynamically aggregate unified debts from explicit dbDebts and debt-categorized transactions
+  const debts = useMemo(() => {
+    return aggregateUnifiedDebts(dbDebts, transactions, categories);
+  }, [dbDebts, transactions, categories]);
 
   // Calculate generic balances locally in O(N + M) without extra render pass
   const accounts = useMemo(() => {
@@ -457,9 +463,25 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
   const updateDebt = useCallback(async (id: string, d: Partial<Omit<Debt, 'id'>>) => {
     if (!currentUser) return;
     const existing = debts.find(item => item.id === id);
-    if (!existing || existing.userId !== currentUser.uid) return;
+    if (!existing) return;
     try {
-      await updateDoc(doc(db, 'debts', id), d);
+      if (id.startsWith('auto_')) {
+        await addDoc(collection(db, 'debts'), {
+          personName: existing.personName,
+          type: existing.type,
+          totalAmount: existing.totalAmount,
+          paidAmount: existing.paidAmount,
+          currency: existing.currency,
+          dueDate: existing.dueDate || null,
+          note: existing.note || null,
+          isSettled: existing.isSettled || false,
+          createdAt: existing.createdAt || new Date().toISOString(),
+          ...d,
+          userId: currentUser.uid,
+        });
+      } else {
+        await updateDoc(doc(db, 'debts', id), d);
+      }
     } catch (e) {
       console.error("Error updating debt: ", e);
     }
@@ -468,9 +490,13 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
   const deleteDebt = useCallback(async (id: string) => {
     if (!currentUser) return;
     const existing = debts.find(item => item.id === id);
-    if (!existing || existing.userId !== currentUser.uid) return;
+    if (!existing) return;
     try {
-      await deleteDoc(doc(db, 'debts', id));
+      if (!id.startsWith('auto_')) {
+        await deleteDoc(doc(db, 'debts', id));
+      } else if (existing.sourceTransactionId) {
+        await deleteDoc(doc(db, 'transactions', existing.sourceTransactionId));
+      }
     } catch (e) {
       console.error("Error deleting debt: ", e);
     }
