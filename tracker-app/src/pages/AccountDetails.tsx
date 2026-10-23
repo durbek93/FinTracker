@@ -14,7 +14,7 @@ const formatCurrency = (amount: number, currency: string) => {
 export default function AccountDetails() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { accounts, transactions, categories, deleteAccount } = useStore();
+  const { accounts, transactions, categories, deleteAccount, updateAccount } = useStore();
   const [activeTab, setActiveTab] = useState<'all' | 'expense' | 'income'>('all');
   
   const account = accounts.find(a => a.id === id);
@@ -74,9 +74,44 @@ export default function AccountDetails() {
       <div className="glass-panel" style={{ padding: '24px', background: 'linear-gradient(135deg, var(--accent-primary) 0%, #8b5cf6 100%)', color: 'white', border: 'none', marginBottom: '20px' }}>
         <h3 style={{ fontSize: '20px', fontWeight: 600, marginBottom: '4px' }}>{account.name}</h3>
         <p style={{ opacity: 0.9, marginBottom: '12px', fontSize: '14px' }}>{currency} Счет</p>
-        <h2 style={{ fontSize: '32px', fontWeight: 700 }}>
+        <h2 style={{ fontSize: '32px', fontWeight: 700, marginBottom: '16px' }}>
           {formatCurrency(balance, currency)}
         </h2>
+
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button
+            onClick={() => updateAccount(account.id, { excludeFromStats: !account.excludeFromStats })}
+            style={{
+              fontSize: '12px',
+              padding: '6px 12px',
+              borderRadius: '20px',
+              border: 'none',
+              background: account.excludeFromStats ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.2)',
+              color: 'white',
+              cursor: 'pointer',
+              fontWeight: 500,
+            }}
+            title={account.excludeFromStats ? "Включить этот счет в аналитику и статистику" : "Исключить этот счет из аналитики и статистики"}
+          >
+            {account.excludeFromStats ? '✕ Вне статистики' : '✓ В статистике'}
+          </button>
+          <button
+            onClick={() => updateAccount(account.id, { excludeFromTotal: !account.excludeFromTotal })}
+            style={{
+              fontSize: '12px',
+              padding: '6px 12px',
+              borderRadius: '20px',
+              border: 'none',
+              background: account.excludeFromTotal ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.2)',
+              color: 'white',
+              cursor: 'pointer',
+              fontWeight: 500,
+            }}
+            title={account.excludeFromTotal ? "Показывать в общем балансе на главной" : "Скрыть из общего баланса на главной"}
+          >
+            {account.excludeFromTotal ? '✕ Скрыт из общего баланса' : '✓ В общем балансе'}
+          </button>
+        </div>
       </div>
 
       {/* Summary strip: Расход / Приход */}

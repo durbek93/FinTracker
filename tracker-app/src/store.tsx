@@ -172,40 +172,43 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
         try {
           const promises = DEFAULT_CATEGORIES.map(c => {
             const { id, ...rest } = c;
-            const scopedId = `${currentUser.uid}_${id}`;
-            return setDoc(doc(db, 'categories', scopedId), { ...rest, userId: currentUser.uid });
+            return setDoc(doc(db, 'categories', id), { ...rest, userId: currentUser.uid });
           });
           await Promise.all(promises);
         } catch (e) {
           console.error('Failed to seed categories', e);
-          setCategories(DEFAULT_CATEGORIES.map(c => ({ ...c, id: `${currentUser.uid}_${c.id}`, userId: currentUser.uid })));
+          setCategories(DEFAULT_CATEGORIES.map(c => ({ ...c, userId: currentUser.uid })));
         }
         return;
       }
 
-      setCategories(dbCategories);
+      // Deduplicate categories by name + type to guarantee UI never shows duplicates
+      const seen = new Set<string>();
+      const uniqueCats = dbCategories.filter(c => {
+        const key = `${c.name.trim().toLowerCase()}_${c.type}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      setCategories(uniqueCats);
 
-      // Check if any DEFAULT_CATEGORIES are missing (supporting both legacy `id` and scoped `${uid}_${id}`)
+      // Check if any DEFAULT_CATEGORIES are missing
       const existingIds = new Set(dbCategories.map(c => c.id));
       const missingDefaults = DEFAULT_CATEGORIES.filter(c =>
         !existingIds.has(c.id) &&
         !existingIds.has(`${currentUser.uid}_${c.id}`) &&
-        !dbCategories.some(dbCat => dbCat.name === c.name && dbCat.type === c.type)
+        !dbCategories.some(dbCat => dbCat.name.trim().toLowerCase() === c.name.trim().toLowerCase() && dbCat.type === c.type)
       );
       if (missingDefaults.length > 0) {
         console.log(`Re-seeding ${missingDefaults.length} missing default categories...`);
         try {
           const promises = missingDefaults.map(c => {
             const { id, ...rest } = c;
-            const scopedId = `${currentUser.uid}_${id}`;
-            return setDoc(doc(db, 'categories', scopedId), { ...rest, userId: currentUser.uid });
+            return setDoc(doc(db, 'categories', id), { ...rest, userId: currentUser.uid });
           });
           await Promise.all(promises);
         } catch (e) {
           console.error('Failed to re-seed missing categories', e);
-          const merged = [...dbCategories];
-          missingDefaults.forEach(c => merged.push({ ...c, id: `${currentUser.uid}_${c.id}`, userId: currentUser.uid }));
-          setCategories(merged);
         }
       }
     });

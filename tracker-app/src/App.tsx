@@ -100,6 +100,12 @@ const Dashboard = () => {
     const budgetedCats = categories.filter(c => c.type === 'expense' && (c.monthlyBudgetUZS || 0) > 0);
     if (budgetedCats.length === 0) return [];
 
+    const excludedAccountIds = new Set(
+      accounts
+        .filter(a => a.excludeFromStats || a.name.trim().toLowerCase().includes('недостача'))
+        .map(a => a.id)
+    );
+
     const now = new Date();
     const mStart = startOfMonth(now);
     const mEnd = endOfMonth(now);
@@ -107,6 +113,7 @@ const Dashboard = () => {
     const spentByCat: Record<string, number> = {};
     for (const t of transactions) {
       if (t.type !== 'expense' || t.excludeFromStats) continue;
+      if (excludedAccountIds.has(t.accountId) || (t.toAccountId && excludedAccountIds.has(t.toAccountId))) continue;
       const d = new Date(t.date);
       if (d < mStart || d > mEnd) continue;
       const amtUZS = t.currency === 'UZS'
@@ -123,7 +130,7 @@ const Dashboard = () => {
         return { category: c, limit, spent, pct };
       })
       .sort((a, b) => b.pct - a.pct);
-  }, [categories, transactions]);
+  }, [categories, transactions, accounts]);
 
   const activeDebtsCount = debts.filter(d => !d.isSettled).length;
 

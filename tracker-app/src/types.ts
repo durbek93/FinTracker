@@ -17,6 +17,7 @@ export interface Account {
   name: string;
   currency?: Currency;
   excludeFromTotal?: boolean;
+  excludeFromStats?: boolean;
   isProtected?: boolean;
   order?: number;
   balanceUZS: number;

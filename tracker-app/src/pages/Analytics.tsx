@@ -198,9 +198,19 @@ export default function Analytics() {
     }
   };
 
-  // Filter out excluded and apply date range + tag filter + hiddenCategoryIds
+  const excludedAccountIds = useMemo(() => {
+    return new Set(
+      accounts
+        .filter(a => a.excludeFromStats || a.name.trim().toLowerCase().includes('недостача'))
+        .map(a => a.id)
+    );
+  }, [accounts]);
+
+  // Filter out excluded and apply date range + tag filter + hiddenCategoryIds + excluded accounts
   const transactions = storeTransactions.filter(t => {
     if (t.excludeFromStats) return false;
+    if (excludedAccountIds.has(t.accountId)) return false;
+    if (t.toAccountId && excludedAccountIds.has(t.toAccountId)) return false;
     const cat = categories.find(c => c.id === t.categoryId);
     if (cat?.excludeFromStats) return false;
     if (t.categoryId && hiddenCategoryIds.includes(t.categoryId)) return false;
@@ -237,6 +247,8 @@ export default function Analytics() {
 
     for (const t of storeTransactions) {
       if (t.excludeFromStats) continue;
+      if (excludedAccountIds.has(t.accountId)) continue;
+      if (t.toAccountId && excludedAccountIds.has(t.toAccountId)) continue;
       const cat = categories.find(c => c.id === t.categoryId);
       if (cat?.excludeFromStats) continue;
       if (t.categoryId && hiddenCategoryIds.includes(t.categoryId)) continue;
@@ -259,7 +271,7 @@ export default function Analytics() {
     }
 
     return { prevExpenseTotal, prevIncomeTotal, prevByCategory };
-  }, [storeTransactions, categories, startDate, endDate, selectedTag, hiddenCategoryIds]);
+  }, [storeTransactions, categories, startDate, endDate, selectedTag, hiddenCategoryIds, excludedAccountIds]);
 
   const [type, setType] = useState<'expense' | 'income'>('expense');
   const [chartMode, setChartMode] = useState<'donut' | 'bar'>('donut');
@@ -271,6 +283,8 @@ export default function Analytics() {
 
     const hiddenTxs = storeTransactions.filter(t => {
       if (t.excludeFromStats) return false;
+      if (excludedAccountIds.has(t.accountId)) return false;
+      if (t.toAccountId && excludedAccountIds.has(t.toAccountId)) return false;
       if (!t.categoryId || !hiddenCategoryIds.includes(t.categoryId)) return false;
       if (t.type !== type) return false;
 
@@ -303,7 +317,7 @@ export default function Analytics() {
         };
       })
       .filter(item => Boolean(item.category));
-  }, [storeTransactions, categories, hiddenCategoryIds, type, startDate, endDate]);
+  }, [storeTransactions, categories, hiddenCategoryIds, type, startDate, endDate, excludedAccountIds]);
 
   // ── Expense calculations ─────────────────────────────────────────────────
   const expenseTxs = transactions.filter(t => t.type === 'expense');

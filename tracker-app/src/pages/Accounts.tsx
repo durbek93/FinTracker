@@ -134,7 +134,7 @@ export default function Accounts() {
 
               <Link to={`/account/${acc.id}`} style={{ flex: 1, textDecoration: 'none', color: 'inherit' }}>
                 <h4 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '4px' }}>
-                  {acc.name} {isProtected && <span style={{ fontSize: '12px', color: 'var(--success)', fontWeight: 500 }}>(Защищен)</span>}
+                  {acc.name} {isProtected && <span style={{ fontSize: '12px', color: 'var(--success)', fontWeight: 500 }}>(Защищен)</span>} {acc.excludeFromStats && <span style={{ fontSize: '12px', color: '#f59e0b', fontWeight: 500 }}>(Вне статистики)</span>}
                 </h4>
                 <p className="text-muted" style={{ fontSize: '13px' }}>
                   {currency} Счет {acc.excludeFromTotal ? '(Скрыт)' : ''}
