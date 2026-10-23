@@ -15,7 +15,7 @@ const formatCurrency = (amount: number, currency: string) => {
 // ── SVG Donut Chart ────────────────────────────────────────────────────────
 interface DonutSlice { color: string; percentage: number; label: string; }
 
-function DonutChart({ slices }: { slices: DonutSlice[] }) {
+function DonutChart({ slices, centerTotal }: { slices: DonutSlice[]; centerTotal?: string }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const cx = 110, cy = 110, r = 78, stroke = 26;
   const circumference = 2 * Math.PI * r;
@@ -52,6 +52,13 @@ function DonutChart({ slices }: { slices: DonutSlice[] }) {
             </text>
             <text x={cx} y={cy + 12} textAnchor="middle" fill={hoveredSlice.color} fontSize="20" fontWeight="700">
               {hoveredSlice.percentage.toFixed(1)}%
+            </text>
+          </>
+        ) : centerTotal ? (
+          <>
+            <text x={cx} y={cy - 6} textAnchor="middle" fill="var(--text-muted)" fontSize="11">Всего</text>
+            <text x={cx} y={cy + 13} textAnchor="middle" fill="var(--text-primary)" fontSize="13" fontWeight="700">
+              {centerTotal}
             </text>
           </>
         ) : (
@@ -449,7 +456,6 @@ export default function Analytics() {
 
   // ── Category analytics ────────────────────────────────────────────────────
   const filteredTx = transactions.filter(t => t.type === type);
-  const totalAmount = type === 'expense' ? grandTotal : totalIncomeUZS;
 
   const categoryTotals: Record<string, number> = {};
   filteredTx.forEach(t => {
@@ -459,6 +465,8 @@ export default function Analytics() {
     categoryTotals[t.categoryId] = (categoryTotals[t.categoryId] || 0) + amountInUZS;
   });
 
+  const totalCategorizedAmount = Object.values(categoryTotals).reduce((sum, val) => sum + val, 0);
+
   const sortedCategories = Object.entries(categoryTotals)
     .map(([id, amount]) => {
       const prevAmt = prevPeriodStats?.prevByCategory[id] || 0;
@@ -466,7 +474,7 @@ export default function Analytics() {
       return {
         category: categories.find(c => c.id === id),
         amount,
-        percentage: totalAmount > 0 ? (amount / totalAmount) * 100 : 0,
+        percentage: totalCategorizedAmount > 0 ? (amount / totalCategorizedAmount) * 100 : 0,
         momPct,
       };
     })
@@ -1190,7 +1198,7 @@ ${aiReport.advice.map(a => '• ' + a).join('\n')}
           </div>
         ) : (
           <div className="glass-panel" style={{ padding: '16px' }}>
-            {chartMode === 'donut' && <DonutChart slices={donutSlices} />}
+            {chartMode === 'donut' && <DonutChart slices={donutSlices} centerTotal={formatCurrency(totalCategorizedAmount, 'UZS')} />}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               {sortedCategories.map(item => {
                 const IconComp = getIcon(item.category?.iconName || '');
