@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import { getIcon } from '../lib/icons';
@@ -206,12 +206,21 @@ export default function Analytics() {
     );
   }, [accounts]);
 
+  const findCategory = useCallback((catId?: string) => {
+    if (!catId) return undefined;
+    return categories.find(c =>
+      c.id === catId ||
+      c.id.endsWith(`_${catId}`) ||
+      catId.endsWith(`_${c.id}`)
+    );
+  }, [categories]);
+
   // Filter out excluded and apply date range + tag filter + hiddenCategoryIds + excluded accounts
   const transactions = storeTransactions.filter(t => {
     if (t.excludeFromStats) return false;
     if (excludedAccountIds.has(t.accountId)) return false;
     if (t.toAccountId && excludedAccountIds.has(t.toAccountId)) return false;
-    const cat = categories.find(c => c.id === t.categoryId);
+    const cat = findCategory(t.categoryId);
     if (cat?.excludeFromStats) return false;
     if (t.categoryId && hiddenCategoryIds.includes(t.categoryId)) return false;
     if (selectedTag && (!t.tags || !t.tags.includes(selectedTag))) return false;
@@ -249,7 +258,7 @@ export default function Analytics() {
       if (t.excludeFromStats) continue;
       if (excludedAccountIds.has(t.accountId)) continue;
       if (t.toAccountId && excludedAccountIds.has(t.toAccountId)) continue;
-      const cat = categories.find(c => c.id === t.categoryId);
+      const cat = findCategory(t.categoryId);
       if (cat?.excludeFromStats) continue;
       if (t.categoryId && hiddenCategoryIds.includes(t.categoryId)) continue;
       if (selectedTag && (!t.tags || !t.tags.includes(selectedTag))) continue;
@@ -310,7 +319,7 @@ export default function Analytics() {
 
     return hiddenCategoryIds
       .map(id => {
-        const cat = categories.find(c => c.id === id);
+        const cat = findCategory(id);
         return {
           category: cat,
           amount: totals[id] || 0,
@@ -486,7 +495,7 @@ export default function Analytics() {
       const prevAmt = prevPeriodStats?.prevByCategory[id] || 0;
       const momPct = prevAmt > 0 ? ((amount - prevAmt) / prevAmt) * 100 : null;
       return {
-        category: categories.find(c => c.id === id),
+        category: findCategory(id),
         amount,
         percentage: totalCategorizedAmount > 0 ? (amount / totalCategorizedAmount) * 100 : 0,
         momPct,
@@ -513,7 +522,7 @@ export default function Analytics() {
         incCatTotals[t.categoryId] = (incCatTotals[t.categoryId] || 0) + amt;
       });
       const incomesByCategory = Object.entries(incCatTotals).map(([id, amt]) => ({
-        category: categories.find(c => c.id === id)?.name || 'Неизвестно',
+        category: findCategory(id)?.name || 'Неизвестно',
         amount: amt,
         percentage: totalIncomeUZS > 0 ? Number(((amt / totalIncomeUZS) * 100).toFixed(1)) : 0
       })).sort((a,b) => b.amount - a.amount);
@@ -526,7 +535,7 @@ export default function Analytics() {
         expCatTotals[t.categoryId] = (expCatTotals[t.categoryId] || 0) + amt;
       });
       const expensesByCategory = Object.entries(expCatTotals).map(([id, amt]) => ({
-        category: categories.find(c => c.id === id)?.name || 'Неизвестно',
+        category: findCategory(id)?.name || 'Неизвестно',
         amount: amt,
         percentage: totalCategorizedExpenses > 0 ? Number(((amt / totalCategorizedExpenses) * 100).toFixed(1)) : 0
       })).sort((a,b) => b.amount - a.amount);
@@ -810,7 +819,7 @@ ${aiReport.advice.map(a => '• ' + a).join('\n')}
             </span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
               {hiddenCategoryIds.map(id => {
-                const cat = categories.find(c => c.id === id);
+                const cat = findCategory(id);
                 return (
                   <button
                     key={id}

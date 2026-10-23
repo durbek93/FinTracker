@@ -440,7 +440,7 @@ export default function History() {
 
                 <div className="glass-panel" style={{ padding: '8px 16px' }}>
                   {group.transactions.map((t, idx) => {
-                    const category = categories.find(c => c.id === t.categoryId);
+                    const category = categories.find(c => c.id === t.categoryId || c.id.endsWith(`_${t.categoryId}`) || t.categoryId?.endsWith(`_${c.id}`));
                     const isTransfer = t.type === 'transfer';
                     const isIncome = t.type === 'income';
 

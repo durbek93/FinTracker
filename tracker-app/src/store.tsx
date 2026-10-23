@@ -182,9 +182,18 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
         return;
       }
 
-      // Deduplicate categories by name + type to guarantee UI never shows duplicates
+      // Deduplicate categories by name + type to guarantee UI never shows duplicates.
+      // Sort first so that base/short IDs (e.g. "food", "business", "lent") come before prefixed IDs ("uid_food")
+      const sortedDbCats = [...dbCategories].sort((a, b) => {
+        const aHasPrefix = a.id.includes('_');
+        const bHasPrefix = b.id.includes('_');
+        if (aHasPrefix && !bHasPrefix) return 1;
+        if (!aHasPrefix && bHasPrefix) return -1;
+        return a.id.length - b.id.length;
+      });
+
       const seen = new Set<string>();
-      const uniqueCats = dbCategories.filter(c => {
+      const uniqueCats = sortedDbCats.filter(c => {
         const key = `${c.name.trim().toLowerCase()}_${c.type}`;
         if (seen.has(key)) return false;
         seen.add(key);
