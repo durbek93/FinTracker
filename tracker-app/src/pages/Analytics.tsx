@@ -222,7 +222,8 @@ export default function Analytics() {
     if (t.toAccountId && excludedAccountIds.has(t.toAccountId)) return false;
     const cat = findCategory(t.categoryId);
     if (cat?.excludeFromStats) return false;
-    if (t.categoryId && hiddenCategoryIds.includes(t.categoryId)) return false;
+    const effectiveCatId = cat?.id || t.categoryId;
+    if (effectiveCatId && hiddenCategoryIds.includes(effectiveCatId)) return false;
     if (selectedTag && (!t.tags || !t.tags.includes(selectedTag))) return false;
 
     const tDate = new Date(t.date);
@@ -260,7 +261,8 @@ export default function Analytics() {
       if (t.toAccountId && excludedAccountIds.has(t.toAccountId)) continue;
       const cat = findCategory(t.categoryId);
       if (cat?.excludeFromStats) continue;
-      if (t.categoryId && hiddenCategoryIds.includes(t.categoryId)) continue;
+      const effectiveCatId = cat?.id || t.categoryId;
+      if (effectiveCatId && hiddenCategoryIds.includes(effectiveCatId)) continue;
       if (selectedTag && (!t.tags || !t.tags.includes(selectedTag))) continue;
 
       const d = new Date(t.date);
@@ -272,10 +274,10 @@ export default function Analytics() {
 
       if (t.type === 'expense') {
         prevExpenseTotal += amtUZS;
-        prevByCategory[t.categoryId] = (prevByCategory[t.categoryId] || 0) + amtUZS;
+        prevByCategory[effectiveCatId] = (prevByCategory[effectiveCatId] || 0) + amtUZS;
       } else if (t.type === 'income') {
         prevIncomeTotal += amtUZS;
-        prevByCategory[t.categoryId] = (prevByCategory[t.categoryId] || 0) + amtUZS;
+        prevByCategory[effectiveCatId] = (prevByCategory[effectiveCatId] || 0) + amtUZS;
       }
     }
 
@@ -294,7 +296,9 @@ export default function Analytics() {
       if (t.excludeFromStats) return false;
       if (excludedAccountIds.has(t.accountId)) return false;
       if (t.toAccountId && excludedAccountIds.has(t.toAccountId)) return false;
-      if (!t.categoryId || !hiddenCategoryIds.includes(t.categoryId)) return false;
+      const cat = findCategory(t.categoryId);
+      const effectiveCatId = cat?.id || t.categoryId;
+      if (!effectiveCatId || !hiddenCategoryIds.includes(effectiveCatId)) return false;
       if (t.type !== type) return false;
 
       const tDate = new Date(t.date);
@@ -314,7 +318,9 @@ export default function Analytics() {
       const amtUZS = t.currency === 'UZS'
         ? t.amount
         : (t.convertedAmount ?? (t.exchangeRate ? t.amount * t.exchangeRate : 0));
-      totals[t.categoryId] = (totals[t.categoryId] || 0) + amtUZS;
+      const cat = findCategory(t.categoryId);
+      const resolvedId = cat?.id || t.categoryId;
+      totals[resolvedId] = (totals[resolvedId] || 0) + amtUZS;
     }
 
     return hiddenCategoryIds
@@ -485,7 +491,9 @@ export default function Analytics() {
     const amountInUZS = t.currency === 'UZS' 
       ? t.amount 
       : (t.convertedAmount ?? (t.exchangeRate ? t.amount * t.exchangeRate : 0));
-    categoryTotals[t.categoryId] = (categoryTotals[t.categoryId] || 0) + amountInUZS;
+    const cat = findCategory(t.categoryId);
+    const resolvedId = cat?.id || t.categoryId;
+    categoryTotals[resolvedId] = (categoryTotals[resolvedId] || 0) + amountInUZS;
   });
 
   const totalCategorizedAmount = Object.values(categoryTotals).reduce((sum, val) => sum + val, 0);
@@ -519,7 +527,9 @@ export default function Analytics() {
       const incCatTotals: Record<string, number> = {};
       incomeTxs.forEach(t => {
         const amt = t.currency === 'UZS' ? t.amount : (t.convertedAmount || (t.exchangeRate ? t.amount * t.exchangeRate : 0));
-        incCatTotals[t.categoryId] = (incCatTotals[t.categoryId] || 0) + amt;
+        const cat = findCategory(t.categoryId);
+        const resolvedId = cat?.id || t.categoryId;
+        incCatTotals[resolvedId] = (incCatTotals[resolvedId] || 0) + amt;
       });
       const incomesByCategory = Object.entries(incCatTotals).map(([id, amt]) => ({
         category: findCategory(id)?.name || 'Неизвестно',
@@ -532,7 +542,9 @@ export default function Analytics() {
       const expCatTotals: Record<string, number> = {};
       expenseTxs.forEach(t => {
         const amt = t.currency === 'UZS' ? t.amount : (t.convertedAmount || 0);
-        expCatTotals[t.categoryId] = (expCatTotals[t.categoryId] || 0) + amt;
+        const cat = findCategory(t.categoryId);
+        const resolvedId = cat?.id || t.categoryId;
+        expCatTotals[resolvedId] = (expCatTotals[resolvedId] || 0) + amt;
       });
       const expensesByCategory = Object.entries(expCatTotals).map(([id, amt]) => ({
         category: findCategory(id)?.name || 'Неизвестно',
